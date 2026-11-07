@@ -1,0 +1,5 @@
+{"changes": [
+ {"level": 5, "en": "New: Space — see what takes up room in your monitored folders: biggest files, biggest folders, size by file type, and growth over 30 days", "zh": "新功能：空间占用——查看监控文件夹里什么最占空间：最大的文件、最大的文件夹、按类型的大小，以及 30 天内的增长"},
+ {"level": 3, "en": "Languages: DeskTrace now speaks English and 简体中文 (German was removed)", "zh": "语言：桌迹现在提供英文和简体中文（已移除德语）"},
+ {"level": 2, "en": "The sidebar shows the total size of the monitored folders next to Space", "zh": "侧边栏“空间占用”旁显示监控文件夹的总大小"}
+]}

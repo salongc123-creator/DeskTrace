@@ -1,0 +1,4 @@
+{"changes": [
+ {"level": 4, "en": "Alert rules: one-click templates — an Office document or PDF deleted, anything deleted or moved, a new program or script", "zh": "提醒规则：一键模板——Office 文档或 PDF 被删除、任何文件被删除或移走、出现新的程序或脚本"},
+ {"level": 3, "en": "While you edit a rule, DeskTrace shows how often it would have triggered in the last 30 days, with examples", "zh": "编辑规则时，桌迹会显示这条规则在最近 30 天内会触发多少次，并给出示例"}
+]}

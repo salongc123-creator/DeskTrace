@@ -1,0 +1,5 @@
+{"changes": [
+ {"level": 5, "en": "New: Duplicates — finds files with identical content anywhere in your monitored folders, biggest waste first", "zh": "新功能：重复文件——在所有监控文件夹中找出内容完全相同的文件，按浪费的空间从大到小排列", "de": "Neu: Duplikate – findet Dateien mit identischem Inhalt in allen überwachten Ordnern, größte Verschwendung zuerst"},
+ {"level": 3, "en": "Move an extra copy to the Recycle Bin right from DeskTrace; the last copy is always protected", "zh": "可直接在桌迹中把多余的副本移到回收站；最后一份始终受保护", "de": "Überzählige Kopien direkt aus DeskTrace in den Papierkorb verschieben; die letzte Kopie ist immer geschützt"},
+ {"level": 2, "en": "The sidebar shows how many sets of duplicates there are; ↑ ↓ move through them", "zh": "侧边栏显示重复文件的组数；可用 ↑ ↓ 逐个查看", "de": "Die Seitenleiste zeigt die Anzahl der Duplikat-Gruppen; ↑ ↓ blättern durch sie"}
+]}

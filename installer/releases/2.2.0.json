@@ -1,0 +1,12 @@
+{"changes": [
+ {"level": 5, "en": "New: Clean up — pick any drive and see what takes up its space: a ring chart of used, cleanable and free space, the biggest folders as a bar chart you can click into, the size by file type and the biggest files", "zh": "新功能：空间清理——选择任意磁盘，查看空间都用在了哪里：已用 / 可清理 / 可用空间的环形图、可点击进入的最大文件夹条形图、按文件类型的大小以及最大的文件"},
+ {"level": 4, "en": "Clean up says what deleting means before you click: each place to clean and each big file explains the consequence, and whether it is deleted for good or goes to the Recycle Bin; Windows and installed programs are never offered for deletion", "zh": "空间清理在点击之前就说明删除的后果：每个可清理项目和每个大文件都会说明后果，以及是永久删除还是移到回收站；Windows 和已安装程序的文件绝不会被列为可删除"},
+ {"level": 3, "en": "One-click cleaning of temporary files, browser caches (Edge, Chrome, Firefox), crash reports, picture thumbnails, developer caches (pip, npm, Yarn), old installers in Downloads and the Recycle Bin; files in use or changed within the hour are skipped, links are never followed", "zh": "一键清理临时文件、浏览器缓存（Edge、Chrome、Firefox）、崩溃报告、图片缩略图、开发工具缓存（pip、npm、Yarn）、下载文件夹中的旧安装程序和回收站；正在使用或一小时内修改过的文件会被跳过，绝不跟随链接"},
+ {"level": 3, "en": "Clean up: Windows Update leftovers, which need administrator rights, open Windows Disk Cleanup; program files offer \"Uninstall a program…\" instead of deleting", "zh": "空间清理：需要管理员权限的 Windows 更新残留会打开 Windows 磁盘清理；程序文件提供“卸载程序…”而不是直接删除"},
+ {"level": 2, "en": "Reading a whole drive runs in Windows background mode and keeps at most about 13 MB in memory (1.9 million files); the result is let go after 10 minutes without use", "zh": "读取整个磁盘时以 Windows 后台模式运行，内存最多约 13 MB（190 万个文件）；闲置 10 分钟后会释放结果"},
+ {"level": 3, "en": "Simpler: Folder time travel, Writing progress and Alert rules were removed; your notifications for changes and deletions stay as they were", "zh": "更简洁：删除了文件夹时光回溯、写作进度和提醒规则；变更与删除通知保持不变"},
+ {"level": 3, "en": "Notes are part of Changes now: a \"Only versions with a note\" button with the count sits next to ★ in the toolbar, instead of a separate sidebar entry", "zh": "备注并入“文件变更”：工具栏 ★ 旁新增带数量的“只看带备注的版本”按钮，不再单独占用侧边栏"},
+ {"level": 3, "en": "Space shows a ring chart of the size by file type", "zh": "“空间占用”以环形图显示各文件类型的大小"},
+ {"level": 2, "en": "Statistics: the changes-per-day chart shows every day (quiet days next to a busy one stay visible), its scale and its dates", "zh": "统计：每日变更图显示每一天（繁忙日旁的少量变更也清晰可见），并显示刻度和日期"},
+ {"level": 1, "en": "Statistics: clicking a day in the chart now opens that day's changes", "zh": "统计：点击图表中的某一天现在会打开当天的变更"}
+]}

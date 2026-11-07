@@ -1,0 +1,10 @@
+{"changes": [
+ {"level": 4, "en": "First-run guide: the test file is restored right inside the guide with its own Restore button — no pop-up or notification is needed, so the guide cannot get stuck", "zh": "入门向导：测试文件直接在向导里用它自己的“恢复”按钮找回——不需要任何弹出提示或系统通知，向导不会卡住"},
+ {"level": 3, "en": "Reading a drive while you wait uses at most 4 worker processes (about 100 MB together, gone when done); stopping ends them at once, and if they cannot start the drive is read in DeskTrace itself with the same result", "zh": "你等待时读取磁盘最多使用 4 个工作进程（合计约 100 MB，完成后即释放）；停止时立即结束它们；如果无法启动，则由桌迹自己读取，结果相同"},
+ {"level": 3, "en": "Backups say which DeskTrace can read them (FORMAT.txt), \"Back up for older versions\" writes every version uncompressed for DeskTrace 2.3.0 and older, and Diagnostics shows the version format", "zh": "备份会注明哪些版本的桌迹能读取（FORMAT.txt）；“为旧版本备份”会把每个版本不压缩地写出，供桌迹 2.3.0 及更早版本使用；诊断信息会显示版本格式"},
+ {"level": 3, "en": "Clean up is clearer about its numbers: folder and type totals are marked as estimates, the possible over-count from tiny files is shown, files without an extension are labelled as such, a scan older than a day says it may be out of date, and the WinSxS correction is shown while it runs", "zh": "空间清理的数字说明更清楚：文件夹和类型的合计标为估算，显示极小文件可能造成的高估，无扩展名的文件单独标注，超过一天的扫描会提示可能已过期，修正 WinSxS 时会显示进度"},
+ {"level": 2, "en": "Restored copies are named like \"report (restored 2026-11-07 01-19-05).docx\"", "zh": "恢复的副本命名为“报告 (恢复于 2026-11-07 01-19-05).docx”这样的格式"},
+ {"level": 2, "en": "The background preparation of Clean up no longer keeps its own timer; it is checked when DeskTrace wakes up anyway", "zh": "“空间清理”的后台预先准备不再使用单独的定时器，而是在桌迹本来就会唤醒时顺便检查"},
+ {"level": 1, "en": "Game files no longer offer \"Uninstall a program…\"; games are uninstalled in their launcher", "zh": "游戏文件不再提供“卸载程序…”；游戏请在其平台中卸载"},
+ {"level": 1, "en": "First-run guide: the delete step shows \"Deleted\" when it is done instead of staying on \"Deleting…\"", "zh": "入门向导：删除步骤完成后显示“已删除”，不再一直显示“正在删除…”"}
+]}

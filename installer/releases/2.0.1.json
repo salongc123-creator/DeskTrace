@@ -1,0 +1,179 @@
+{
+ "changes": [
+  {
+   "level": 4,
+   "en": "Alert rules no longer flood you: a burst of matching changes (e.g. a deleted folder) becomes one notification per rule",
+   "zh": "提醒规则不再刷屏：一连串符合规则的变更（例如删除整个文件夹）会合并为每条规则一条通知"
+  },
+  {
+   "level": 4,
+   "en": "Duplicates now also finds large identical files (videos, archives, installers) beyond the snapshot limit; they are checked in the background",
+   "zh": "重复文件现在也能找出超过快照上限的大文件（视频、压缩包、安装包），它们会在后台检查"
+  },
+  {
+   "level": 4,
+   "en": "Space: click a folder to look inside it — its biggest files, subfolders, types and growth; a separate button opens it in Explorer",
+   "zh": "空间占用：点击文件夹即可查看其内部——最大的文件、子文件夹、类型和增长；另有按钮可在资源管理器中打开"
+  },
+  {
+   "level": 3,
+   "en": "Alert rules: Show matches lists every change a rule has caught",
+   "zh": "提醒规则：“查看匹配”可列出该规则捕获的所有变更"
+  },
+  {
+   "level": 3,
+   "en": "Writing: set a daily word goal and see today's progress towards it",
+   "zh": "写作进度：可设置每日字数目标，并查看今天的完成进度"
+  },
+  {
+   "level": 3,
+   "en": "Alert rules: Pause all alerts for a while (e.g. while reorganising files) without changing the rules",
+   "zh": "提醒规则：可暂时“暂停所有提醒”（例如整理文件时），而无需修改规则"
+  },
+  {
+   "level": 3,
+   "en": "After an update, What's new lists the changes you just received, with their levels",
+   "zh": "更新后，“新内容”会列出刚刚获得的变化及其级别"
+  },
+  {
+   "level": 3,
+   "en": "When the list shows only deletions, one button restores all of them — handy after an accidental mass delete",
+   "zh": "当列表只显示删除记录时，一个按钮即可全部恢复——误删大量文件后很方便"
+  },
+  {
+   "level": 3,
+   "en": "Replace current file with this version (under More): roll a document back in place; its current content stays in DeskTrace so you can switch back",
+   "zh": "用此版本替换当前文件（在“更多”中）：可直接把文档改回旧版本；当前内容仍保存在桌迹中，可随时换回"
+  },
+  {
+   "level": 1,
+   "en": "Esc works again for closing the detail panel, menus and the sidebar (since 1.6.1 the new shortcuts had taken it over)",
+   "zh": "Esc 键重新可以关闭详情面板、菜单和侧边栏（1.6.1 起被新的快捷键占用）"
+  },
+  {
+   "level": 3,
+   "en": "Duplicates: right-click a set to open or show its newest copy, or keep the newest and recycle the rest",
+   "zh": "重复文件：右键单击某组可打开或显示最新的一份，或保留最新的并回收其余副本"
+  },
+  {
+   "level": 2,
+   "en": "Statistics: clicking one of the most changed files opens its history",
+   "zh": "统计：点击改动最多的文件会直接打开其历史记录"
+  },
+  {
+   "level": 3,
+   "en": "Right-click any change or file in a list for its common actions: open, show in folder, restore, star, note, copy path",
+   "zh": "在列表中右键单击任何变更或文件即可使用常用操作：打开、在文件夹中显示、恢复、加星标、备注、复制路径"
+  },
+  {
+   "level": 3,
+   "en": "Alert rules: an optional minimum size, e.g. to be told when a file over 500 MB appears",
+   "zh": "提醒规则：可设置最小文件大小，例如出现超过 500 MB 的文件时提醒"
+  },
+  {
+   "level": 2,
+   "en": "Alert rules: an optional notification sound per rule",
+   "zh": "提醒规则：每条规则可选择是否播放提示音"
+  },
+  {
+   "level": 3,
+   "en": "Writing: a chart of the words you wrote on each of the last 7 days, across all documents",
+   "zh": "写作进度：图表显示最近 7 天每天在所有文档中写了多少字"
+  },
+  {
+   "level": 2,
+   "en": "New installations notify about deleted files by default (existing settings are kept)",
+   "zh": "新安装默认在文件被删除时通知（已有设置保持不变）"
+  },
+  {
+   "level": 3,
+   "en": "Files: a Changed only switch shows just the files that have a history of changes (remembered)",
+   "zh": "文件：“只看有改动的”开关只显示有变更历史的文件（会被记住）"
+  },
+  {
+   "level": 3,
+   "en": "Duplicates and Space can be exported to Excel, e.g. as a clean-up list",
+   "zh": "重复文件和空间占用可以导出为 Excel，例如作为清理清单"
+  },
+  {
+   "level": 3,
+   "en": "Space: shows how much is taken by files not changed for over a year, and lists the biggest of them as clean-up candidates",
+   "zh": "空间占用：显示超过一年未改动的文件占用了多少空间，并列出其中最大的文件作为清理候选"
+  },
+  {
+   "level": 3,
+   "en": "Space: the biggest folders no longer list a folder and its own subfolder twice",
+   "zh": "空间占用：最大的文件夹列表不再重复列出某个文件夹及其子文件夹"
+  },
+  {
+   "level": 3,
+   "en": "A tidier detail panel: the main actions stay in view, the rest (download, open or save this version, copy path, ignore folder) are under More",
+   "zh": "更整洁的详情面板：主要操作保持可见，其余操作（下载、打开或另存此版本、复制路径、忽略文件夹）放在“更多”中"
+  },
+  {
+   "level": 3,
+   "en": "Duplicates ignores tiny files (under 1 KB) and system files such as desktop.ini and Thumbs.db",
+   "zh": "重复文件会忽略很小的文件（小于 1 KB）和 desktop.ini、Thumbs.db 等系统文件"
+  },
+  {
+   "level": 3,
+   "en": "Pop-ups inside the window only appear for deletions (with Restore); other changes are highlighted in the list",
+   "zh": "窗口内的弹出提示只在删除时出现（带“恢复”按钮）；其他变更会在列表中高亮"
+  },
+  {
+   "level": 3,
+   "en": "Settings: the snapshot and indexing size limits moved into Advanced",
+   "zh": "设置：快照与索引的大小限制移到了“高级”中"
+  },
+  {
+   "level": 2,
+   "en": "Files: click a file's \"N changes\" badge to go straight to its history",
+   "zh": "文件：点击文件的“N 次变更”标签可直接查看其历史"
+  },
+  {
+   "level": 2,
+   "en": "Writing: shows how many days in a row you reached your daily goal",
+   "zh": "写作进度：显示连续达成每日目标的天数"
+  },
+  {
+   "level": 2,
+   "en": "Settings shows the size and number of files of each monitored folder",
+   "zh": "设置中会显示每个监控文件夹的大小和文件数量"
+  },
+  {
+   "level": 2,
+   "en": "Ctrl+3, Ctrl+4 and Ctrl+5 open Duplicates, Space and Writing (Ctrl+1 / Ctrl+2: Changes / Files)",
+   "zh": "Ctrl+3、Ctrl+4、Ctrl+5 分别打开重复文件、空间占用和写作进度（Ctrl+1 / Ctrl+2：变更 / 文件）"
+  },
+  {
+   "level": 2,
+   "en": "On a deleted file, Restore is the highlighted button",
+   "zh": "对已删除的文件，“恢复”是突出显示的主按钮"
+  },
+  {
+   "level": 2,
+   "en": "While the window is open, changes caught by an alert rule also pop up inside it, with the rule's name",
+   "zh": "窗口打开时，符合提醒规则的变更也会在窗口内弹出提示，并显示规则名称"
+  },
+  {
+   "level": 2,
+   "en": "Restored versions keep their original date when it is known",
+   "zh": "恢复的版本在已知时会保留原来的修改日期"
+  },
+  {
+   "level": 2,
+   "en": "A simpler sidebar: the 2-hour activity chart was removed (Statistics shows activity in more detail)",
+   "zh": "更简洁的侧边栏：移除了 2 小时活动图（统计中有更详细的活动信息）"
+  },
+  {
+   "level": 1,
+   "en": "Duplicates, Space and Writing only recalculate while their view is open, so DeskTrace does less work in the background",
+   "zh": "重复文件、空间占用和写作进度只在打开对应视图时重新计算，后台负担更小"
+  },
+  {
+   "level": 1,
+   "en": "The message after quitting no longer mentions closing a browser tab",
+   "zh": "退出后的提示不再提及关闭浏览器标签页"
+  }
+ ]
+}

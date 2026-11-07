@@ -1,0 +1,5 @@
+{"changes": [
+ {"level": 5, "en": "New: Writing progress — every document (Word, PowerPoint, PDF, Markdown, text) gets a Progress tab charting its word count across all saved versions, with today's and this week's gain (Chinese is counted by character)", "zh": "新功能：写作进度——每个文档（Word、PowerPoint、PDF、Markdown、文本）都有“进度”标签，用图表显示所有已保存版本的字数变化，以及今天和本周新增的字数（中文按字计算）"},
+ {"level": 4, "en": "The Writing view lists the documents you worked on this week, most words added first, each with a small trend line", "zh": "“写作进度”视图列出本周编辑过的文档，按新增字数排序，每个都带有趋势小图"},
+ {"level": 2, "en": "Versions with a note stand out as larger dots in the progress chart", "zh": "带备注的版本在进度图中显示为较大的圆点"}
+]}

@@ -1,0 +1,4 @@
+{"changes": [
+ {"level": 3, "en": "Space: click a file type in the overview to list the biggest files of that type", "zh": "空间占用：在概览中点击某个文件类型，即可列出该类型最大的文件"},
+ {"level": 2, "en": "Space: each of the biggest folders shows its share of the total", "zh": "空间占用：每个最大的文件夹都会显示其占总量的百分比"}
+]}

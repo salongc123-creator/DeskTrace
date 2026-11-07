@@ -1,0 +1,5 @@
+{"changes": [
+ {"level": 5, "en": "New: Alert rules — get a desktop notification when a change matches your rule (kind of change, file names like *.docx, and an optional folder), even when other notifications are off", "zh": "新功能：提醒规则——当变更符合你的规则（变更类型、*.docx 之类的文件名、可选的文件夹）时弹出桌面通知，即使其他通知已关闭"},
+ {"level": 3, "en": "Each rule counts how often it was triggered and when it last was; rules can be switched off without deleting them", "zh": "每条规则都会统计触发次数和最近一次的时间；规则可以关闭而无需删除"},
+ {"level": 2, "en": "Changes that matched a rule carry a bell tag with the rule's name", "zh": "符合规则的变更会带上标有规则名称的铃铛标签"}
+]}

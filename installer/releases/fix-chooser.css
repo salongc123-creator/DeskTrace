@@ -1,0 +1,5 @@
+/* update chooser: the buttons stay in view, the content scrolls above them */
+.modal.upd { display: flex; flex-direction: column; overflow: hidden; }
+.modal.upd .m-body { flex: 1; min-height: 0; overflow: auto; }
+.modal.upd .m-head, .modal.upd .m-foot { flex: none; }
+.modal.upd .upd-changes { max-height: none; }

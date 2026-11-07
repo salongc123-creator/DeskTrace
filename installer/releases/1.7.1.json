@@ -1,0 +1,5 @@
+{"changes": [
+ {"level": 4, "en": "Duplicates: one click keeps the newest copy and moves all the others to the Recycle Bin", "zh": "重复文件：一键保留最新的一份，其余副本全部移到回收站", "de": "Duplikate: ein Klick behält die neueste Kopie und verschiebt alle anderen in den Papierkorb"},
+ {"level": 3, "en": "Duplicates can be sorted by space used, number of copies or name (remembered)", "zh": "重复文件可按占用空间、副本数量或名称排序（会被记住）", "de": "Duplikate lassen sich nach Platz, Anzahl der Kopien oder Name sortieren (wird gemerkt)"},
+ {"level": 2, "en": "Enter opens the newest copy of the selected set of duplicates", "zh": "按 Enter 打开所选重复组中最新的一份", "de": "Enter öffnet die neueste Kopie der gewählten Duplikat-Gruppe"}
+]}

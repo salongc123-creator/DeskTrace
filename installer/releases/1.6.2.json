@@ -1,0 +1,5 @@
+{"changes": [
+ {"level": 3, "en": "The window opens where you left it: view, date range, sort order and search mode are remembered", "zh": "窗口会回到上次离开时的状态：视图、时间范围、排序方式和搜索方式都会被记住", "de": "Das Fenster öffnet sich so, wie Sie es verlassen haben: Ansicht, Zeitraum, Sortierung und Suchart werden gemerkt"},
+ {"level": 2, "en": "The Notes view explains how to add a note when there are none yet", "zh": "“备注”视图在还没有备注时会说明如何添加", "de": "Die Notizen-Ansicht erklärt, wie man eine Notiz hinzufügt, solange noch keine da ist"},
+ {"level": 1, "en": "Esc now also closes the pause menu", "zh": "按 Esc 现在也会关闭暂停菜单", "de": "Esc schließt jetzt auch das Pausenmenü"}
+]}

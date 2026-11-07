@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="token" content="__TOKEN__">
+  <meta name="version" content="__VERSION__">
+  <title>DeskTrace</title>
+  <link rel="icon" href="/static/logo-256.png">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#06b6d4"/></linearGradient></defs>
+        <rect width="32" height="32" rx="7.7" fill="url(#lg)"/>
+        <path d="M10.8 6h7.3l5.3 5.3v12.5a2.2 2.2 0 0 1-2.2 2.2H10.8a2.2 2.2 0 0 1-2.2-2.2V8.2A2.2 2.2 0 0 1 10.8 6z" fill="#fff"/>
+        <path d="M18.1 6v4.5a.8.8 0 0 0 .8.8h4.5z" fill="#c7d2fe"/>
+        <path d="M11.2 10h5M11.2 12.9h3.4" stroke="#c7d2fe" stroke-width="1.35" stroke-linecap="round"/>
+        <path d="M11.6 21.4l3.6-5 2.7 2.6 3.1-5.4" fill="none" stroke="#4f46e5" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="11.6" cy="21.4" r="1.5" fill="#4f46e5"/><circle cx="15.2" cy="16.4" r="1.5" fill="#4f46e5"/><circle cx="17.9" cy="19" r="1.5" fill="#4f46e5"/>
+        <circle cx="21" cy="13.6" r="2.4" fill="#10b981" stroke="#fff" stroke-width=".9"/></svg></div>
+      <div class="brand-title" data-i18n="app.name">DeskTrace</div>
+    </div>
+    <nav class="nav" id="modeSeg">
+      <button data-mode="changes" data-group="history"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span data-i18n="mode.changes"></span><span class="n" id="count"></span></button>
+      <button class="sub-nav" data-mode="files"><svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/></svg><span data-i18n="mode.files"></span><span class="n" id="fileCount"></span></button>
+      <button class="sub-nav" data-mode="dups" id="dupsNav"><svg viewBox="0 0 24 24"><path d="M8 7V4h9l3 3v11h-3"/><path d="M4 8h9l3 3v9H4z"/></svg><span data-i18n="dup.nav"></span><span class="n" id="dupCount"></span></button>
+      <button class="sub-nav" data-mode="space" id="spaceNav"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg><span data-i18n="sp.nav"></span><span class="n" id="spaceTotal"></span></button>
+      <button data-mode="clean" id="cleanNav" data-group="clean"><svg viewBox="0 0 24 24"><path d="M14 3l7 7"/><path d="M17.5 6.5 11 13"/><path d="M11 13c-3 0-6 2-7 8 6-1 8-4 8-7z"/><path d="m7 17 1.5-1.5"/></svg><span data-i18n="cl.nav"></span><span class="n" id="cleanFree"></span></button>
+    </nav>
+    <div class="side-scroll">
+      <section>
+        <div class="sec-title"><span data-i18n="side.today"></span> <span class="sec-hint" data-i18n="side.clickFilter"></span></div>
+        <div class="kpis" id="kpis"></div>
+      </section>
+      <section>
+        <div class="sec-title"><span data-i18n="side.types"></span> <span class="sec-hint" data-i18n="side.typesHint"></span></div>
+        <div class="cats" id="cats"></div>
+      </section>
+      <section>
+        <div class="sec-title" data-i18n="side.monitoring"></div>
+        <div id="scope" class="scope"></div>
+      </section>
+    </div>
+    <div class="side-foot">
+      <button class="icon-btn" id="themeBtn" data-i18n-title="title.theme"></button>
+      <div class="lang-wrap up">
+        <button class="icon-btn lang-btn" id="langBtn" data-i18n-title="title.language" aria-haspopup="menu"></button>
+        <div class="menu" id="langMenu" role="menu" hidden></div>
+      </div>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="settingsBtn" data-i18n-title="title.settings"></button>
+    </div>
+  </aside>
+
+  <header class="topbar">
+    <button class="icon-btn only-narrow" id="sidebarBtn" data-i18n-title="title.overview"></button>
+    <div class="page-head">
+      <h1 id="pageTitle"></h1>
+      <div class="brand-sub" id="scopeLabel">—</div>
+    </div>
+    <div class="status" id="status"><span class="pulse"></span><span id="statusText" data-i18n="status.connecting"></span></div>
+    <label class="search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" data-i18n-ph="search.placeholder" autocomplete="off" spellcheck="false">
+      <kbd>/</kbd>
+    </label>
+    <div class="top-actions">
+      <button class="btn upd-badge" id="updBtn" hidden></button>
+      <div class="lang-wrap">
+        <button class="btn" id="pauseBtn" aria-haspopup="menu"></button>
+        <div class="menu" id="pauseMenu" role="menu" hidden></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="timeline">
+    <div class="tl-head">
+      <div class="tabs-row"><div class="view-tabs" id="viewTabs"></div><button class="btn sm toggle gone-btn" id="goneBtn" aria-pressed="false"></button></div>
+      <div class="warn-bar" id="warnBar" hidden></div>
+      <div class="tl-top">
+        <span class="tl-tools" id="changesTools">
+          <span class="seg small" id="rangeSeg">
+            <button data-range="all" class="on" data-i18n="range.all"></button>
+            <button data-range="today" data-i18n="range.today"></button>
+            <button data-range="yesterday" data-i18n="range.yesterday" id="rangeYesterday"></button>
+            <button data-range="7" data-i18n="range.7"></button>
+            <button data-range="30" data-i18n="range.30"></button>
+          </span>
+          <span class="day-pick"><button class="icon-btn sm" id="dayPick" data-i18n-title="day.pick"></button><input type="date" id="dayInput" tabindex="-1" aria-hidden="true"></span>
+          <span class="spacer"></span>
+          <button class="btn sm" id="exportBtn" data-i18n-title="export.title"></button>
+        </span>
+        <span class="tl-tools" id="filesTools" hidden>
+          <span class="seg small" id="searchSeg">
+            <button data-smode="name" class="on" data-i18n="files.byName"></button>
+            <button data-smode="content" data-i18n="files.byContent"></button>
+          </span>
+          <span class="spacer"></span>
+          <button class="btn sm toggle" id="changedOnly" data-i18n="files.changedOnly" aria-pressed="false"></button>
+          <select class="sel-sm" id="sortSel">
+            <option value="recent" data-i18n="files.sortRecent"></option>
+            <option value="name" data-i18n="files.sortName"></option>
+            <option value="size" data-i18n="files.sortSize"></option>
+            <option value="changes" data-i18n="files.sortChanges"></option>
+          </select>
+        </span>
+        <span class="tl-tools" id="dupsTools" hidden><span class="tl-sum" id="dupsSum"></span><span class="spacer"></span>
+          <select class="sel-sm" id="dupSort">
+            <option value="wasted" data-i18n="dup.sortWasted"></option>
+            <option value="count" data-i18n="dup.sortCount"></option>
+            <option value="name" data-i18n="dup.sortName"></option>
+          </select>
+          <button class="btn sm" data-export-view="dups" data-i18n-title="export.title">Excel</button></span>
+        <span class="tl-tools" id="cleanTools" hidden><span class="tl-sum" id="cleanSum"></span></span>
+        <span class="tl-tools" id="spaceTools" hidden><span class="tl-sum" id="spaceSum"></span><span class="spacer"></span>
+          <button class="btn sm" id="spaceOverview" data-i18n="sp.overview"></button>
+          <button class="btn sm" data-export-view="space" data-i18n-title="export.title">Excel</button></span>
+        <button class="icon-btn sm" id="starBtn" data-i18n-title="star.filter" aria-pressed="false"></button>
+        <button class="icon-btn sm noted-btn" id="notedBtn" data-i18n-title="notes.filter" aria-pressed="false" hidden></button>
+      </div>
+      <div class="chips" id="activeFilters"></div>
+    </div>
+    <div class="list" id="list" tabindex="0"></div>
+  </main>
+
+  <section class="detail" id="detail"></section>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<div class="tooltip" id="tooltip"></div>
+<div class="menu ctx-menu" id="ctxMenu" role="menu" hidden></div>
+<div class="modal-back" id="modalBack" hidden><div class="modal" id="modal"></div></div>
+<script src="/static/i18n.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

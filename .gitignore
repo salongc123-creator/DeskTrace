@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Build output (installers and licenses are attached to GitHub Releases instead)
+build/
+dist/
+
+# History data from running DeskTrace from source
+desktop_watch/data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+instance.json
+
+# The private release key that signs .dtlicense files — never commit it
+installer/keys/
+*.pem
+*-key.json
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
