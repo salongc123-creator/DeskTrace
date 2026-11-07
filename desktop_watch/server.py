@@ -53,7 +53,7 @@ from extractors import EXTRACTABLE, VERSION as EXTRACT_VERSION, category_of, ext
 APP_DIR = Path(__file__).resolve().parent
 APP_ID = 'desktop-watch/1'   # internal id (kept from the old name: older copies answer to it)
 APP_NAME = 'DeskTrace'
-APP_VERSION = '2.4.2'      # the installer and update licenses take their version number from here
+APP_VERSION = '2.5.0'      # the installer and update licenses take their version number from here
 SCHEMA_VERSION = 2       # bump with a step in migrate() whenever stored data changes shape
 TOKEN = secrets.token_hex(16)
 

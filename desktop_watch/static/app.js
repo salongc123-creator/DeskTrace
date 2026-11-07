@@ -724,6 +724,73 @@ function renderClean() {
     <div class="day">${t('cl.big')}</div>${bigHTML}`;
 }
 
+/* The space grid (2.5.0): every block is a folder, its area is the space it takes; a click jumps to the
+   folder's row in the list below. Laid out as a squarified treemap so blocks stay close to square. */
+const GRID_COLORS = ['var(--accent)', 'var(--c-media)', 'var(--c-archive)', 'var(--created)', 'var(--renamed)', 'var(--c-ppt)', 'var(--modified)', 'var(--c-image)', 'var(--c-code)', 'var(--c-excel)'];
+function squarify(items, x, y, w, h) {
+  const out = [], total = items.reduce((s, b) => s + b.v, 0) || 1;
+  let rest = items.map(b => ({ ...b, a: b.v / total * w * h }));
+  const worst = (row, side) => {
+    const s = row.reduce((t, b) => t + b.a, 0), mx = Math.max(...row.map(b => b.a)), mn = Math.min(...row.map(b => b.a));
+    return Math.max(side * side * mx / (s * s), s * s / (side * side * mn));
+  };
+  while (rest.length) {
+    const side = Math.min(w, h);
+    let row = [rest[0]], i = 1;
+    while (i < rest.length && worst([...row, rest[i]], side) <= worst(row, side)) row.push(rest[i++]);
+    rest = rest.slice(i);
+    const s = row.reduce((t, b) => t + b.a, 0);
+    if (w >= h) { const cw = s / h; let cy = y; row.forEach(b => { const ch = b.a / cw; out.push({ ...b, x, y: cy, w: cw, h: ch }); cy += ch; }); x += cw; w -= cw; }
+    else { const ch = s / w; let cx = x; row.forEach(b => { const cw = b.a / ch; out.push({ ...b, x: cx, y, w: cw, h: ch }); cx += cw; }); y += ch; h -= ch; }
+  }
+  return out;
+}
+function spaceGridHTML(d) {
+  setTimeout(gridPendingJump, 0);  // after a click on a deeper block: show it once its folder is open
+  const folders = (d.folders || []).slice(0, 16).filter(f => f.size > 0);
+  if (folders.length < 2 || !d.size) return '';
+  const rest = Math.max(0, d.size - folders.reduce((s, f) => s + f.size, 0));
+  const items = folders.map((f, i) => ({ v: f.size, f, color: GRID_COLORS[i % GRID_COLORS.length] }));
+  if (rest > d.size * 0.01) items.push({ v: rest, f: null, color: 'var(--c-other)' });
+  const W = 1000, H = 400, pos = (x, y, w, h) => `left:${(x / W * 100).toFixed(3)}%;top:${(y / H * 100).toFixed(3)}%;width:${(w / W * 100).toFixed(3)}%;height:${(h / H * 100).toFixed(3)}%`;
+  const label = (name, v, w, h) => w > 90 && h > 34 ? `<span class="nm">${name}</span><span class="sz">${fmtSize(v)} · ${Math.round(v / d.size * 100)}%</span>` : (w > 60 && h > 18 ? `<span class="nm">${name}</span>` : '');
+  let html = '';
+  for (const c of squarify(items, 0, 0, W, H)) {
+    if (!c.f) { html += `<button type="button" class="cl-cell rest" disabled title="${t('cl.gridRest')} · ${fmtSize(c.v)}" style="${pos(c.x, c.y, c.w, c.h)};--cell:${c.color}">${label(t('cl.gridRest'), c.v, c.w, c.h)}</button>`; continue; }
+    const subs = (c.f.sub || []).filter(x => x.size >= c.f.size * 0.03);  // under 3 %: part of the grey rest (no slivers)
+    const head = 34;
+    if (subs.length >= 2 && c.w > 70 && c.h > 70) {  // the block is split into its subfolders (2.5.0)
+      html += `<button type="button" class="cl-cell group" data-cl-jump="${esc(c.f.path)}" title="${esc(c.f.path)} · ${fmtSize(c.v)}
+${t('cl.tipTop')}" style="${pos(c.x, c.y, c.w, c.h)};--cell:${c.color}">
+        <span class="nm">${esc(c.f.name)} <span class="sz">${fmtSize(c.v)} · ${Math.round(c.v / d.size * 100)}%</span></span></button>`;
+      const own = Math.max(0, c.f.size - subs.reduce((s, x) => s + x.size, 0));
+      const inner = subs.map((sf, k) => ({ v: sf.size, sf, k }));
+      if (own > c.f.size * 0.02) inner.push({ v: own, sf: null, k: inner.length });
+      for (const b of squarify(inner, c.x + 3, c.y + head, c.w - 6, c.h - head - 3)) {
+        const box = `${pos(b.x, b.y, b.w, b.h)};--cell:${c.color};--shade:${55 + (b.k % 4) * 10}%`;
+        html += b.sf
+          ? `<button type="button" class="cl-cell sub" data-cl-jump="${esc(b.sf.path)}" data-cl-parent="${esc(c.f.path)}" title="${esc(b.sf.path)} · ${fmtSize(b.v)}
+${t('cl.tipSub', { dir: esc(c.f.name) })}" style="${box}">${label(esc(b.sf.name), b.v, b.w, b.h)}</button>`
+          : `<button type="button" class="cl-cell sub rest" disabled title="${t('cl.gridFiles')} · ${fmtSize(b.v)}" style="${box}">${label(t('cl.gridFiles'), b.v, b.w, b.h)}</button>`;
+      }
+    } else {
+      html += `<button type="button" class="cl-cell" data-cl-jump="${esc(c.f.path)}" title="${esc(c.f.path)} · ${fmtSize(c.v)}
+${t('cl.tipTop')}" style="${pos(c.x, c.y, c.w, c.h)};--cell:${c.color}">${label(esc(c.f.name), c.v, c.w, c.h)}</button>`;
+    }
+  }
+  return `<div class="field"><label>${t('cl.grid')} <span class="hint">· ${t('cl.gridHint')}</span></label><div class="cl-grid">${html}</div></div>`;
+}
+function gridJump(path) {
+  const row = [...$$('#detail [data-cl-folder]')].find(x => x.dataset.clFolder === path)?.closest('.sp-frow');
+  if (!row) return false;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+  return true;
+}
+function gridPendingJump() {
+  if (S.gridJump && S.clean && S.clean.state !== 'scanning' && gridJump(S.gridJump)) S.gridJump = null;
+}
+
 function donutSVG(parts, size = 168) {  // parts: [{v, color, label}]; a ring chart drawn as dashed circles
   const r = 62, c = 2 * Math.PI * r, sum = parts.reduce((a, p) => a + p.v, 0) || 1;
   let off = 0;
@@ -762,6 +829,7 @@ function renderCleanOverview() {
         ${inRoot && cleanable ? `<div class="cl-gain">${svg('check')} ${t('cl.gain2', { now: fmtSize(tot.now), later: fmtSize(tot.later + (bin ? bin.size : 0)) })}</div>` : ''}</div></div>
     <div class="tab-body">
       ${!scanned ? `<div class="empty-state small"><span class="spin"></span> ${t('cl.scanning', { n: num(d.files || 0), size: fmtSize(d.bytes || 0) })}</div>` : `
+      ${spaceGridHTML(d)}
       <div class="field"><label>${t('cl.folders')} <span class="hint">· ${t('cl.drillHint')}</span></label>
         ${(d.folders || []).slice(0, 16).map(f => `<div class="sp-frow"><button class="sp-folder" data-cl-folder="${esc(f.path)}">
           ${svg('folder')}<span class="nm">${esc(f.name)}${f.shared ? ` <span class="cl-usage inline"><span>${t('cl.sharedFolder', { size: fmtSize(f.shared) })}</span></span>` : ''}</span><span class="bar"><i style="width:${(f.size / fMax * 100).toFixed(1)}%"></i></span>
@@ -872,6 +940,20 @@ function hiberConfirm(on) {  // Windows asks for permission itself (UAC); nothin
   $('#hbGo').onclick = async () => { closeModal(); await post('/api/clean/hibernate', { on }); notify(t('cl.hiberAsked')); setTimeout(() => loadClean(), 15000); };
 }
 
+function deleteConfirm(f) {  // any file can go, but the user decides knowing what happens (2.5.0)
+  const risky = !['personal', 'safe'].includes(f.level), recent = Date.now() / 1000 - (f.mtime || 0) < 86400;
+  const uninstall = f.why === 'program' ? `<button type="button" class="btn left" id="clUninst">${svg('open')}${t('cl.openApps')}</button>` : '';
+  openModal(`<div class="m-head"><h3>${t('cl.askTitle', { name: esc(f.name) })}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+    <div class="m-body"><div class="cl-conseq l-${f.level}">${levelBadge(f)}<p><b>${t('cl.ifDelete')}</b> ${t('cl.file.' + f.why)}</p></div>
+      ${t('cl.better.' + f.why) !== 'cl.better.' + f.why ? `<p class="hint">${t('cl.better.' + f.why)}</p>` : ''}
+      ${recent ? `<p class="hint warn-text">${t('cl.recent')}</p>` : ''}
+      ${risky || recent ? `<label class="chk"><input type="checkbox" id="clSure2"> ${t('cl.iKnow')}</label>` : `<p class="hint">${t('cl.toBin')}</p>`}</div>
+    <div class="m-foot">${uninstall}<button class="btn primary" data-close>${t('btn.cancel')}</button><button class="btn danger" id="clGo2" ${risky || recent ? 'disabled' : ''}>${svg('trash')}${t('cl.recycleFile')}</button></div>`, 'sm');
+  if ($('#clSure2')) $('#clSure2').onchange = ev => { $('#clGo2').disabled = !ev.target.checked; };
+  if ($('#clUninst')) $('#clUninst').onclick = () => post('/api/clean/apps').catch(() => {});
+  $('#clGo2').onclick = () => { closeModal(); deleteBigFile(f.path); };
+}
+
 async function deleteBigFile(path, permanent = false) {
   const since = Date.now() / 1000;
   const r = await post('/api/clean/delete', { path, permanent }).catch(() => ({}));
@@ -893,7 +975,7 @@ async function deleteBigFile(path, permanent = false) {
 }
 
 async function cleanAct(ev) {
-  const b = ev.target.closest('[data-cl-app],[data-cl-hiber],[data-cl-power],[data-cl-drive],[data-cl-pick],[data-cl-go],[data-cl-empty],[data-cl-win],[data-cl-rescan],[data-cl-stop],[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back]');
+  const b = ev.target.closest('[data-cl-app],[data-cl-hiber],[data-cl-power],[data-cl-drive],[data-cl-pick],[data-cl-go],[data-cl-empty],[data-cl-win],[data-cl-rescan],[data-cl-stop],[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back],[data-cl-jump]');
   if (!b) return false;
   const ds = b.dataset;
   if (ds.clPick) {  // a checkbox: keep the browser's own toggle, just remember it
@@ -905,6 +987,9 @@ async function cleanAct(ev) {
   ev.stopPropagation();
   if (ds.clDrive) { S.cleanDrive = ds.clDrive; S.clean = null; S.cleanFolder = null; S.cleanSel = null; renderList(); loadClean(); }
   else if (ds.clGo != null) cleanConfirm();
+  else if (ds.clJump) {  // a block of the space grid: show its folder in the list below (2.5.0)
+    if (!gridJump(ds.clJump) && ds.clParent) { S.gridJump = ds.clJump; S.cleanFolder = ds.clParent; loadClean(); }  // a deeper block: open its folder first
+  }
   else if (ds.clBack != null) lastCleanUndo();
   else if (ds.clApp) post('/api/clean/app', { id: ds.clApp });
   else if (ds.clPower != null) post('/api/clean/power');
@@ -920,7 +1005,11 @@ async function cleanAct(ev) {
   else if (ds.clOnline) {
     const r = await post('/api/clean/online', { path: ds.clOnline }).catch(() => ({}));
     notify(r.ok ? t('cl.onlineDone', { size: fmtSize(r.size || 0) }) : esc(errText(r)), !r.ok);
-  } else if (ds.clDel) { b.disabled = true; await deleteBigFile(ds.clDel); b.disabled = false; }
+  } else if (ds.clDel) {
+    const f = [...(S.clean?.big || []), ...(S.clean?.here || [])].find(x => x.path === ds.clDel);
+    if (f) { deleteConfirm(f); return true; }  // always one look at what it means first (2.5.0, Gemini P0-1)
+    b.disabled = true; await deleteBigFile(ds.clDel); b.disabled = false;
+  }
   else if (ds.clFile) selectCleanFile(ds.clFile);
   return true;
 }
@@ -2774,7 +2863,7 @@ function wire() {
     qt = setTimeout(() => { S.q = ev.target.value.trim(); applyFilters(); }, 250);
   });
   $('#detail').addEventListener('click', ev => {
-    if (S.mode === 'clean' && ev.target.closest('[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back]')) return cleanAct(ev);
+    if (S.mode === 'clean' && ev.target.closest('[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back],[data-cl-jump]')) return cleanAct(ev);
     const e = currentItem();
     const mb = ev.target.closest('[data-more]');
     if (mb) { const m = mb.nextElementSibling; m.hidden = !m.hidden; return; }

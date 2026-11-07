@@ -32,6 +32,8 @@ def is_draft(name, is_dir=False):
         return any(w in low for w in DRAFT_DIRS)
     return os.path.splitext(low)[1] in DRAFT_EXTS or low.startswith(DRAFT_NAMES)
 TOP_FILES = 300
+MAX_WORKERS = 4         # worker processes for a scan the user waits for (2.5.0: measured, 8 is no faster)
+SLICE = 0.2             # a worker reads a folder this many seconds, then hands back what is left (2.5.0)
 KEEP_MIN = 1 << 20       # after a scan, folders under 1 MB are not kept (they would never make the lists)
 
 
@@ -462,7 +464,8 @@ class DriveScan:
                 self.kids[self.root] = [f for f, x in parts if x[0] >= KEEP_MIN]
             else:
                 self._walk_top(self.root)
-            self.files, self.bytes = self.dirs[self.root][1], self.dirs[self.root][0]
+            whole = self.dirs.get(self.root, (self.bytes, self.files))  # stopped early: what was read so far
+            self.files, self.bytes = whole[1], whole[0]
             self.state = 'stopped' if self.stop else 'done'
         except Exception as e:  # a scan must never take the service down
             self.state, self.error = 'failed', repr(e)
@@ -473,87 +476,108 @@ class DriveScan:
             except Exception:
                 pass
 
+    def workers(self):
+        """Worker processes for a scan the user waits for on an SSD: up to MAX_WORKERS, half the logical processors
+        ; one in the background or on a spinning disk."""
+        if self.background or self.hdd or not self.priority:
+            return 1
+        return min(MAX_WORKERS, max(2, (os.cpu_count() or 4) // 2))
+
     def _walk_top(self, top):
-        """``top`` and everything below it. The folders two levels down are read in parallel when the user
-        waits for the result on an SSD; in the background or on a spinning disk one at a time."""
-        own_s, own_n, subdirs = self._list(top)
-        units = []
-        child_own = {}
-        for c in subdirs:
-            s, n, sub = self._list(c)
-            child_own[c] = (s, n, sub)
-            units.extend(sub)
-        workers = 1 if (self.background or self.hdd or not self.priority) else min(4, max(2, (os.cpu_count() or 4) // 2))  # 2.4.1: at most 4
-        results = {}
-        if workers > 1 and len(units) > 8:
-            results = self._in_processes(units, workers)
-        if not results:
-            for u in units:
-                if self.stop:
-                    break
-                results[u] = self._walk_safe(u)
-        total_s, total_n, kept_top = own_s, own_n, []
-        for c, (s, n, sub) in child_own.items():
-            cs, cn, kept = s, n, []
-            for u in sub:
-                us, un = results.get(u, (0, 0))
-                cs, cn = cs + us, cn + un
-                if us >= KEEP_MIN:
-                    kept.append(u)
-            self._keep(c, cs, cn, kept)
-            total_s, total_n = total_s + cs, total_n + cn
-            if cs >= KEEP_MIN:
-                kept_top.append(c)
-        self._keep(top, total_s, total_n, kept_top, force=True)
+        """``top`` and everything below it: in parallel when the user waits for it, otherwise one folder
+        at a time."""
+        if self.workers() > 1:
+            r = self._parallel(top, self.workers())
+            if r is not None:
+                return r
+            self._reset()  # the workers failed: read it here instead, from the start
+        total_s, total_n, kept = self._walk(top, force=True)
         return total_s, total_n
 
-    def _in_processes(self, units, workers):
-        """Read ``units`` in ``workers`` separate Python processes (2.4.0): Python itself runs one thread at a
-        time, so real parallel reading needs processes. Each reports its progress and returns its totals;
-        anything going wrong falls back to reading here."""
+    def _reset(self):
+        with self._lock:
+            self.files = self.bytes = self.skipped = self.online = self.tiny = 0
+            self.dirs, self.kids, self.big, self.types = {}, {}, [], {}
+
+    def _parallel(self, top, workers):
+        """Read ``top`` with ``workers`` separate Python processes sharing one queue of folders (2.5.0).
+        A worker reads a folder for at most SLICE seconds, then hands the subfolders it has not started
+        back to the queue (what it listed and finished is reported); small folders are read whole. A worker takes the next folder as
+        soon as it is free, so one huge folder (a user profile, MATLAB, WinSxS) is spread over all of them.
+        Python runs one thread at a time, so real parallel reading needs processes. Returns None if the
+        workers cannot do it (then the caller reads in-process)."""
+        import collections
         import json
+        import queue
         import subprocess
         import sys
-        groups = [units[i::workers] for i in range(workers)]
-        procs, outs = [], {}
+        procs, out = [], queue.Queue()
         try:
-            for g in groups:
-                pr = subprocess.Popen([sys.executable, os.path.abspath(__file__), '--scan-worker'], stdin=subprocess.PIPE,
-                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=0x08000000 if os.name == 'nt' else 0)
-                pr.stdin.write(json.dumps({'units': g, 'cluster': self.cluster, 'floor': 0}).encode('utf-8'))
-                pr.stdin.close()
-                procs.append(pr)
-
-            def read(pr, k):
-                base_f = base_b = 0
-                for line in pr.stdout:
-                    if line.startswith(b'P '):
-                        f, b = map(int, line.split()[1:3])
-                        with self._lock:
-                            self.files, self.bytes = self.files + f - base_f, self.bytes + b - base_b
-                        base_f, base_b = f, b
-                    elif line.startswith(b'R '):
-                        outs[k] = json.loads(line[2:])
-            readers = [threading.Thread(target=read, args=(pr, k), daemon=True) for k, pr in enumerate(procs)]
-            for r in readers:
-                r.start()
-            while any(r.is_alive() for r in readers):
-                if self.stop:
-                    for pr in procs:
-                        pr.kill()
-                    return {}
-                time.sleep(0.2)
-            if len(outs) != len(procs):
-                return {}
+            for _ in range(workers):
+                procs.append(subprocess.Popen([sys.executable, os.path.abspath(__file__), '--scan-worker'],
+                                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                              creationflags=0x08000000 if os.name == 'nt' else 0))
         except OSError:
             for pr in procs:
                 pr.kill()
-            return {}
-        results = {}
+            return None
+
+        def read(k, pr):
+            for line in pr.stdout:
+                out.put((k, line))
+            out.put((k, None))
+        for k, pr in enumerate(procs):
+            threading.Thread(target=read, args=(k, pr), daemon=True).start()
+        todo, busy = collections.deque([top]), [0] * workers
+        listed, walked, finals, counts = {}, {}, {}, [(0, 0)] * workers
+        cl = self.cluster
+        try:
+            while True:
+                for k, pr in enumerate(procs):
+                    while todo and busy[k] < 2:  # two folders in hand: never idle while the next is sent
+                        d = todo.popleft()
+                        pr.stdin.write((json.dumps({'d': d, 'budget': SLICE, 'cluster': cl}) + '\n').encode('utf-8'))
+                        pr.stdin.flush()
+                        busy[k] += 1
+                if not todo and not any(busy):
+                    break
+                if self.stop:
+                    raise InterruptedError
+                try:
+                    k, line = out.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    return self._abort(procs)  # a worker ended early
+                m = json.loads(line)
+                busy[k] -= 1
+                counts[k] = (m['files'], m['bytes'])
+                with self._lock:
+                    self.files, self.bytes = sum(c[0] for c in counts), sum(c[1] for c in counts)
+                for d, s_, n_, sub in m['listed']:
+                    listed[d] = (s_, n_, sub)
+                for d, s_, n_ in m['walked']:
+                    walked[d] = (s_, n_)
+                todo.extend(m['todo'])
+            for pr in procs:
+                pr.stdin.write(b'{"end": true}\n')
+                pr.stdin.close()
+            ended = 0
+            while ended < workers:
+                k, line = out.get(timeout=60)
+                if line is None:
+                    ended += 1
+                elif line.startswith(b'{"t": "R"'):
+                    finals[k] = json.loads(line)
+            if len(finals) != workers:
+                return self._abort(procs)
+        except InterruptedError:
+            self._abort(procs)
+            return 0, 0
+        except (OSError, ValueError, queue.Empty):
+            return self._abort(procs)
         with self._lock:
-            self.files = self.bytes = 0
-            for o in outs.values():
-                results.update({u: tuple(v) for u, v in o['results'].items()})
+            for o in finals.values():
                 self.dirs.update({d: tuple(v) for d, v in o['dirs']})
                 self.kids.update(o['kids'])
                 for k, v in o['types'].items():
@@ -567,7 +591,30 @@ class DriveScan:
                 self.online += o['online']
                 self.skipped += o['skipped']
                 self.tiny += o.get('tiny', 0)
-        return results
+        # the listed folders add up from the bottom: deepest first
+        total = dict(walked)
+        for d in sorted(listed, key=lambda p: -os.path.normpath(p).rstrip('\\').count('\\')):
+            s_, n_, sub = listed[d]
+            kept = []
+            for c in sub:
+                cs, cn = total.get(c, (0, 0))
+                s_, n_ = s_ + cs, n_ + cn
+                if cs >= KEEP_MIN:
+                    kept.append(c)
+            total[d] = (s_, n_)
+            self._keep(d, s_, n_, kept, force=(d == top))
+        if top not in listed and top in total:  # read whole by one worker (a small folder): keep it anyway
+            with self._lock:
+                self.dirs[top] = total[top]
+        return total.get(top, (0, 0))
+
+    def _abort(self, procs):
+        for pr in procs:
+            try:
+                pr.kill()
+            except OSError:
+                pass
+        return None
 
     def _keep(self, d, size, n, kept, force=False):
         if size >= KEEP_MIN or force:
@@ -638,7 +685,7 @@ class DriveScan:
             self.bytes += own_s
         return own_s, own_n, subdirs
 
-    def _walk(self, d):
+    def _walk(self, d, force=False):
         """Whole size of ``d``, adding up on the way back out, so only folders of 1 MB or more are held."""
         own_s, own_n, subdirs = self._list(d)
         total_s, total_n, kept = own_s, own_n, []
@@ -649,8 +696,8 @@ class DriveScan:
             total_s, total_n = total_s + s, total_n + n
             if s >= KEEP_MIN:
                 kept.append(sd)
-        self._keep(d, total_s, total_n, kept)
-        return total_s, total_n
+        self._keep(d, total_s, total_n, kept, force=force)
+        return (total_s, total_n, kept) if force else (total_s, total_n)
 
     def count_shared(self):
         """WinSxS: files hard-linked from elsewhere in Windows take their space only once. Worked out after
@@ -716,7 +763,8 @@ class DriveScan:
                 for e in it:
                     try:
                         st = e.stat(follow_symlinks=False)
-                        if e.is_file(follow_symlinks=False) and not getattr(st, 'st_file_attributes', 0) & (REPARSE | ONLINE_ONLY):
+                        if (e.is_file(follow_symlinks=False) and not getattr(st, 'st_file_attributes', 0) & (REPARSE | ONLINE_ONLY)
+                                and not is_core(e.path)):
                             out.append((st.st_size, e.path, st.st_mtime))
                     except OSError:
                         pass
@@ -739,8 +787,11 @@ class DriveScan:
             self.big = [(r['used'], r['path'], r['mtime'], r['size']) for r in
                         (file_row(p, sz, m, exact=True) for _, p, m, sz in sorted(self.big, reverse=True)[:TOP_FILES])]
             self._exact = True
-        big = sorted(self.big, reverse=True)[:150]
-        return {'folder': folder, 'size': whole[0], 'count': whole[1], 'folders': self.children(folder)[:40],
+        big = [b for b in sorted(self.big, reverse=True) if not is_core(b[1])][:150]
+        folders = self.children(folder)[:40]
+        for f in folders[:16]:  # the space grid's second level (2.5.0)
+            f['sub'] = [{'path': c['path'], 'name': c['name'], 'size': c['size']} for c in self.children(f['path'])[:12]]
+        return {'folder': folder, 'size': whole[0], 'count': whole[1], 'folders': folders,
                 'here': self.own_files(folder) if folder != self.root else [],
                 'big': [file_row(p, sz, m, used=u) for u, p, m, sz in big],
                 'types': [{'ext': e, 'size': s} for e, s in types[:12]],
@@ -771,23 +822,60 @@ class DriveScan:
         return sc
 
 
+def _walk_slice(sc, d, deadline, listed, walked, todo):
+    """Read ``d`` until ``deadline``: returns its (bytes, files) if the whole folder was read in time.
+    Otherwise ``d`` goes into ``listed`` (its own files and subfolders), finished subfolders into
+    ``walked`` and the subfolders not started yet into ``todo``, for any free worker (2.5.0)."""
+    own_s, own_n, subs = sc._list(d)
+    total_s, total_n, kept, done, complete = own_s, own_n, [], [], True
+    for i, c in enumerate(subs):
+        if time.perf_counter() > deadline:
+            todo.extend(subs[i:])
+            complete = False
+            break
+        r = _walk_slice(sc, c, deadline, listed, walked, todo)
+        if r is None:
+            complete = False
+            continue
+        done.append((c, r[0], r[1]))
+        total_s, total_n = total_s + r[0], total_n + r[1]
+        if r[0] >= KEEP_MIN:
+            kept.append(c)
+    if complete:
+        sc._keep(d, total_s, total_n, kept)
+        return total_s, total_n
+    listed.append([d, own_s, own_n, subs])
+    walked.extend([c, s_, n_] for c, s_, n_ in done)
+    return None
+
+
 def _scan_worker():
-    """A worker process of a fast scan: reads the folders it is given and prints its totals as JSON."""
+    """A worker process of a fast scan (2.5.0): takes one folder at a time from the shared queue (a JSON
+    line), reads it for at most ``budget`` seconds, and answers with one line: what it finished, what it
+    only listed and the subfolders it hands back. At the end it sends everything it collected."""
     import json
     import sys
-    job = json.loads(sys.stdin.buffer.read())
     sc = DriveScan('', start=False)
-    sc.cluster = job['cluster']
-    results, last = {}, 0
-    for u in job['units']:
-        results[u] = sc._walk_safe(u)
-        if time.time() - last > 0.5:
-            sys.stdout.write(f'P {sc.files} {sc.bytes}\n')
-            sys.stdout.flush()
-            last = time.time()
-    out = {'results': results, 'dirs': [[d, list(v)] for d, v in sc.dirs.items()], 'kids': sc.kids, 'types': sc.types,
+    for raw in sys.stdin.buffer:
+        job = json.loads(raw)
+        if job.get('end'):
+            break
+        sc.cluster = job['cluster']
+        listed, walked, todo = [], [], []
+        try:
+            r = _walk_slice(sc, job['d'], time.perf_counter() + job['budget'], listed, walked, todo)
+        except RecursionError:
+            sc.skipped += 1
+            r = (0, 0)
+        if r is not None:
+            walked.append([job['d'], r[0], r[1]])
+        m = {'t': 'b', 'listed': listed, 'walked': walked, 'todo': todo}
+        m.update(files=sc.files, bytes=sc.bytes)
+        sys.stdout.write(json.dumps(m) + '\n')
+        sys.stdout.flush()
+    out = {'t': 'R', 'dirs': [[d, list(v)] for d, v in sc.dirs.items()], 'kids': sc.kids, 'types': sc.types,
            'big': [list(b) for b in sc.big], 'online': sc.online, 'skipped': sc.skipped, 'tiny': sc.tiny}
-    sys.stdout.write('R ' + json.dumps(out) + '\n')
+    sys.stdout.write(json.dumps(out) + '\n')
     sys.stdout.flush()
 
 
@@ -821,39 +909,94 @@ MEDIA = {'.mp4', '.mkv', '.mov', '.avi', '.wmv', '.mp3', '.flac', '.wav', '.m4a'
 DOCS = {'.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf', '.txt', '.md', '.csv'}
 
 
+BROWSER_DIRS = ('\\google\\chrome\\user data\\', '\\microsoft\\edge\\user data\\', '\\mozilla\\firefox\\profiles\\',
+                '\\bravesoftware\\', '\\opera software\\', '\\vivaldi\\user data\\', '\\360chrome\\', '\\qqbrowser\\')
+BROWSER_CACHE = ('\\cache\\', '\\cache2\\', '\\code cache\\', '\\gpucache\\', '\\shadercache\\', '\\cachestorage\\',
+                 '\\grshadercache\\', '\\dawncache\\')
+PACKAGE_CACHES = ('\\npm-cache\\', '\\pip\\cache\\', '\\yarn\\cache\\', '\\.cache\\', '\\.gradle\\caches\\', '\\.m2\\repository\\',
+                  '\\.nuget\\packages\\', '\\anaconda3\\pkgs\\', '\\miniconda3\\pkgs\\', '\\go\\pkg\\mod\\', '\\.cargo\\registry\\')
+DATABASES = {'.db', '.sqlite', '.sqlite3', '.mdb', '.accdb', '.mdf', '.ldf', '.edb', '.realm', '.kdbx',
+             '.db-wal', '.db-shm', '.db-journal', '.sqlite-wal', '.sqlite-shm', '.sqlite-journal'}  # a database's journal is part of it
+CORE_ROOT_FILES = {'pagefile.sys', 'swapfile.sys', 'hiberfil.sys', 'bootmgr', 'bootnxt', 'dumpstack.log', 'dumpstack.log.tmp',
+                   'bootsect.bak', 'boottel.dat'}
+CORE_ROOT_DIRS = {'system volume information', 'recovery', 'boot', 'efi', 'msocache'}
+# Windows' own data under ProgramData: machine keys, activation, the credential vault, Defender (Gemini 2.5.0 P1-1)
+CORE_PROGRAMDATA = ('\\microsoft\\crypto\\', '\\microsoft\\windows\\clipsvc\\', '\\microsoft\\vault\\',
+                    '\\microsoft\\windows defender\\', '\\microsoft\\windows\\systemdata\\', '\\microsoft\\protect\\')
+
+
+def is_core(path):
+    """A file Windows itself needs to start and run: never listed and never deleted (2.5.0). Its space
+    still counts in the folder totals."""
+    parts = os.path.normpath(path).split('\\')
+    top = parts[1].lower() if len(parts) > 1 else ''
+    if len(parts) == 2 and top in CORE_ROOT_FILES:
+        return True
+    k = known_dirs()
+    if inside(path, k['programdata']):
+        low = os.path.normcase(path)
+        if any(c in low for c in CORE_PROGRAMDATA):
+            return True
+    return inside(path, k['windows']) or top.startswith('$') or top in CORE_ROOT_DIRS
+
+
 def consequence(path):
-    """What deleting this file means: (level, reason key, can delete). Levels: system (never), cloud
-    (synced: deleting removes it online too), program (uninstall instead), inapp (clean up inside the app),
-    caution (an app's own data), personal (yours: to the Recycle Bin), safe."""
+    """What deleting this file means: (level, reason key, can delete). 2.5.0: everything but core system
+    files can be deleted — the level says what the file is, the reason what deleting it does. Levels:
+    system (core: not listed), cloud (synced: deleting removes it online too), program (part of an
+    installed program or game), inapp (an app's own data such as chat history), caution (settings or
+    caches of an app), personal (yours), safe."""
     k = known_dirs()
     name, ext = os.path.basename(path).lower(), os.path.splitext(path)[1].lower()
     low = os.path.normcase(os.path.normpath(path)) + '\\'
     root_file = os.path.dirname(os.path.normpath(path)).rstrip('\\').endswith(':')
-    if cloud_root_of(path):
-        return 'cloud', 'cloud', False
-    if inside(path, os.path.join(drive_of(path), 'Windows.old')):
-        return 'system', 'winold', False
-    if root_file and name in ('pagefile.sys', 'swapfile.sys'):
-        return 'system', 'pagefile', False
-    if root_file and name == 'hiberfil.sys':
-        return 'system', 'hiberfil', False
-    if inside(path, k['windows']) or name.endswith('.sys') or '\\system volume information' in path.lower():
+    if is_core(path):
         return 'system', 'windows', False
+    if is_draft(name) or any(is_draft(part, True) and part.lower() in ('unsavedfiles', 'autorecover', 'autosave')
+                             for part in os.path.normpath(path).split('\\')[1:-1]):
+        return 'inapp', 'draft', True  # a recovery copy or unsaved draft (2.4.2 promise, Gemini 2.5.0 P0-1)
+    if cloud_root_of(path):
+        return 'cloud', 'cloud', True
+    if inside(path, os.path.join(drive_of(path), 'Windows.old')):
+        return 'program', 'winold', True
     if any(g in low for g in GAME_DIRS):
-        return 'program', 'game', False
+        return 'program', 'game', True
     if any(c in low for c in CHAT_DIRS):
-        return 'inapp', 'chat', False
+        return 'inapp', 'chat', True
     if ext == '.pst':
-        return 'inapp', 'pst', False
+        return 'inapp', 'pst', True
+    # 2.5.0: kinds that are easy to delete by mistake, each with its own warning
+    if 'docker' in low and ext in ('.vhdx', '.vhd', '.raw', '.img'):
+        return 'inapp', 'docker', True
+    if name == 'ext4.vhdx' or (ext in ('.vhdx', '.vhd') and ('\\wsl\\' in low or 'canonicalgroup' in low or 'linux' in low)):
+        return 'inapp', 'wsl', True
+    if '\\mobilesync\\backup\\' in low:
+        return 'inapp', 'phonebackup', True
+    if '\\saved games\\' in low or '\\my games\\' in low:
+        return 'inapp', 'gamesave', True
+    if ext in DATABASES:
+        return 'inapp', 'database', True  # wherever it is: a database and its journal are data, never cache (P0-2, P1-2)
+    if any(b in low for b in BROWSER_DIRS):
+        if any(c in low for c in BROWSER_CACHE):
+            return 'safe', 'browsercache', True
+        return 'inapp', 'browser', True
+    if ext in ('.dmp', '.mdmp', '.hdmp'):
+        return 'safe', 'dump', True
+    if ext in ('.log', '.etl') or name.endswith('.log.old'):
+        return 'safe', 'log', True
+    if any(c in low for c in PACKAGE_CACHES):
+        return 'safe', 'pkgcache', True
     if any(inside(path, p) for p in k['programs']):
-        return 'program', 'program', False
+        return 'program', 'program', True
     if inside(path, k['programdata']):
-        return 'program', 'programdata', False
+        return 'program', 'programdata', True
     if '\\.git\\' in low:
         return 'caution', 'git', True
     if ext == '.ost':
         return 'caution', 'ost', True
     if any(inside(path, a) for a in k['appdata']):
+        if '\\cache\\' in low or '\\caches\\' in low or '\\temp\\' in low:
+            return 'safe', 'appcache', True
         return 'caution', 'appdata', True
     if inside(path, k['downloads']) and ext in INSTALLERS:
         return 'safe', 'installer', True

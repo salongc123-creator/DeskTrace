@@ -906,6 +906,42 @@
      "zh": "移动硬盘拔出时修改设置，不再把它的文件夹从监控列表中删掉"
     }
    ]
+  },
+  {
+   "version": "2.5.0",
+   "date": "2026-11-07",
+   "changes": [
+    {
+     "level": 5,
+     "en": "Clean up can delete any file it lists: for each one it says plainly what the file is, what deleting it does and what is better, and files that are risky to delete need a tick on \"I understand what happens\" first. Core Windows files (the Windows folder, page and hibernation files, System Volume Information, $ folders) are no longer listed at all",
+     "zh": "空间清理现在可以删除列出的任何文件：每个文件都会用大白话说明它是什么、删除后会怎样、有什么更好的做法；删除有风险的文件前需要先勾选“我了解删除后的结果”。Windows 核心文件（Windows 文件夹、页面文件和休眠文件、System Volume Information、以 $ 开头的文件夹）不再列出"
+    },
+    {
+     "level": 5,
+     "en": "Space map: every folder is a block sized by its space, split into its biggest subfolders; click a block to jump to it in the list below (a deeper block opens its folder first)",
+     "zh": "空间分布图：每个文件夹是一个方块，面积代表占用空间，并细分为它最大的子文件夹；点击方块即可跳到下方列表中的对应项（更深一层的方块会先打开所在文件夹）"
+    },
+    {
+     "level": 4,
+     "en": "Reading a drive is about twice as fast: folders are handed to whichever worker is free, and a big folder is split among all of them instead of keeping one worker busy alone (on the test PC 71.5 s → 35.5 s for 1.86 million files)",
+     "zh": "读取磁盘速度约提高一倍：文件夹交给空闲的工作进程处理，大文件夹会分给所有工作进程，不再由一个进程独自读完（测试电脑上 186 万个文件从 71.5 秒降到 35.5 秒）"
+    },
+    {
+     "level": 3,
+     "en": "Against deleting the wrong thing (Gemini review): every deletion shows what it means first; recovery copies and unsaved drafts, databases anywhere (with their -wal / -shm journals) and files changed in the last 24 hours need the tick; Windows' machine keys, activation, credential vault and Defender data, bootsect.bak, boottel.dat and MSOCache are core and not listed; program files offer Windows' uninstall; tiny space-map slivers are merged and blocks say what a click does",
+     "zh": "防止误删（Gemini 评审）：每次删除前都先说明后果；恢复副本和未保存的草稿、任何位置的数据库（含 -wal / -shm 日志）以及 24 小时内修改过的文件需要勾选确认；Windows 的机器密钥、激活凭据、凭据保险库和 Defender 数据，以及 bootsect.bak、boottel.dat、MSOCache 视为核心文件，不再列出；程序文件提供“打开 Windows 卸载”；空间分布图合并过小的碎片方块，并提示点击后的行为"
+    },
+    {
+     "level": 3,
+     "en": "Finer kinds of file against deleting the wrong thing: browser profiles (passwords, bookmarks) apart from browser caches, WSL and Docker virtual disks, iPhone backups, game saves, app databases, logs, crash dumps and package caches each get their own explanation",
+     "zh": "更细的文件分类，避免误删：浏览器配置文件（密码、书签）与浏览器缓存分开，WSL 和 Docker 虚拟磁盘、iPhone 备份、游戏存档、软件数据库、日志、崩溃转储和软件包缓存都有各自的说明"
+    },
+    {
+     "level": 2,
+     "en": "Plain labels instead of \"Uninstall instead\": Program file, Synced to the cloud, App data, App settings or cache, Your file, Can be deleted",
+     "zh": "标签改为直白的说法，不再显示“请改为卸载”：程序文件、云同步文件、应用数据、软件设置或缓存、你的文件、可以删除"
+    }
+   ]
   }
  ]
 }

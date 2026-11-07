@@ -1107,6 +1107,125 @@ Object.assign(I18N.en, {
 Object.assign(I18N.zh, { 'gd.s3b': '这些文件夹中每个被删除的文件都会有同样的“恢复”按钮——点“历史与找回”里的“找回已删除”即可列出。' });
 Object.assign(I18N.en, { 'gd.s3b': 'Every deleted file in these folders gets the same Restore button — click Find deleted in History & restore to list them.' });
 
+// 2.5.0 plain labels: what the file is, what deleting it does, what is better (Clean up)
+Object.assign(I18N.en, {
+  'cl.level.program': 'Program file', 'cl.level.cloud': 'Synced to the cloud', 'cl.level.inapp': 'App data',
+  'cl.level.caution': 'App settings or cache', 'cl.level.personal': 'Your file', 'cl.level.safe': 'Safe to delete', 'cl.level.system': 'Windows',
+  'cl.ifDelete': 'If you delete it:',
+  'cl.file.cloud': 'It is also deleted in the cloud and on every device that syncs this folder. If you only want the space back, choose "Keep online only" — it stays in the cloud.',
+  'cl.file.winold': 'Part of your previous Windows, kept for going back after an upgrade. Deleting single files breaks going back; Windows Disk Cleanup removes it whole.',
+  'cl.file.game': 'The game may no longer start or may want to download this again. To free the space properly, uninstall the game in its launcher (Steam, Epic, …).',
+  'cl.file.program': 'The program it belongs to may stop working or not start. To free the space properly, uninstall the program in Windows Settings.',
+  'cl.file.programdata': 'Data a program shares for all users (settings, licences, downloads). The program may stop working or need to be set up or activated again.',
+  'cl.file.chat': 'Chat history or a received file of this app is lost — it cannot be downloaded again. The app\'s own storage cleanup is the safer way.',
+  'cl.file.pst': 'An Outlook data file: e-mails, contacts and calendar kept only on this PC are lost. Archive or remove it inside Outlook instead.',
+  'cl.file.git': 'Part of a Git repository\'s history; the repository can break. Clean it with Git itself.',
+  'cl.file.ost': 'Outlook\'s offline copy of a mailbox. Outlook downloads it again (which can take long).',
+  'cl.file.appdata': 'Settings, cache or data of an app. Most apps rebuild a cache; settings or saved data may be lost.',
+  'cl.file.installer': 'A setup program you downloaded. Only needed to install that program again.',
+  'cl.file.vm': 'A virtual machine disk: everything inside that virtual machine is lost.',
+  'cl.file.archive': 'An archive you saved. Check that you do not need what is inside.',
+  'cl.file.media': 'Your video, music or picture. Check that you have another copy if you want to keep it.',
+  'cl.file.document': 'Your document. Check that you have another copy if you want to keep it.',
+  'cl.file.program_file': 'A program file you saved (not installed). Only needed to run or install it again.',
+  'cl.file.other': 'A file of yours. Check that you no longer need it.',
+  'cl.better.cloud': 'Better: "Keep online only" frees the space here and keeps the file in the cloud.',
+  'cl.better.game': 'Better: uninstall the game in its launcher — that removes all of it cleanly.',
+  'cl.better.program': 'Better: uninstall the program in Windows Settings → Apps — that removes all of it cleanly.',
+  'cl.better.winold': 'Better: Windows Disk Cleanup → Previous Windows installation(s).',
+  'cl.better.chat': 'Better: open the app and use its own storage cleanup.',
+  'cl.askTitle': 'Delete {name}?', 'cl.iKnow': 'I understand what happens and still want to delete it',
+});
+Object.assign(I18N.zh, {
+  'cl.level.program': '程序文件', 'cl.level.cloud': '云同步文件', 'cl.level.inapp': '应用数据',
+  'cl.level.caution': '软件设置或缓存', 'cl.level.personal': '你的文件', 'cl.level.safe': '可以删除', 'cl.level.system': 'Windows',
+  'cl.ifDelete': '删除后：',
+  'cl.file.cloud': '云端和所有同步这个文件夹的设备上也会一起删除。如果只是想腾出空间，请选“仅保留在线”——文件仍在云端。',
+  'cl.file.winold': '这是旧版 Windows 的一部分，用于升级后退回。删除单个文件会导致无法退回；用 Windows 的“磁盘清理”可以整个删除。',
+  'cl.file.game': '游戏可能无法启动，或需要重新下载这个文件。想彻底腾出空间，请在游戏平台（Steam、Epic 等）中卸载游戏。',
+  'cl.file.program': '它所属的程序可能无法正常工作或无法启动。想彻底腾出空间，请在 Windows 设置中卸载这个程序。',
+  'cl.file.programdata': '程序为所有用户共用的数据（设置、授权、下载内容）。程序可能无法工作，或需要重新设置、重新激活。',
+  'cl.file.chat': '这个应用的聊天记录或收到的文件会丢失，而且无法重新下载。用应用自带的存储清理更安全。',
+  'cl.file.pst': 'Outlook 数据文件：只保存在本机的邮件、联系人和日历会丢失。请在 Outlook 中归档或删除。',
+  'cl.file.git': 'Git 仓库历史的一部分，仓库可能损坏。请用 Git 自己清理。',
+  'cl.file.ost': 'Outlook 邮箱的离线副本。Outlook 会重新下载（可能需要很久）。',
+  'cl.file.appdata': '某个软件的设置、缓存或数据。缓存大多会自动重建；设置或保存的数据可能丢失。',
+  'cl.file.installer': '你下载的安装程序。只有重新安装那个软件时才需要。',
+  'cl.file.vm': '虚拟机磁盘：这台虚拟机里的所有内容都会丢失。',
+  'cl.file.archive': '你保存的压缩包。请确认里面的内容已不需要。',
+  'cl.file.media': '你的视频、音乐或图片。如果还想保留，请确认别处有备份。',
+  'cl.file.document': '你的文档。如果还想保留，请确认别处有备份。',
+  'cl.file.program_file': '你保存的程序文件（未安装）。只有再次运行或安装时才需要。',
+  'cl.file.other': '你的文件。请确认已经不需要它。',
+  'cl.better.cloud': '更好的做法：“仅保留在线”能腾出本机空间，文件仍保留在云端。',
+  'cl.better.game': '更好的做法：在游戏平台中卸载游戏，能干净地全部删除。',
+  'cl.better.program': '更好的做法：在“Windows 设置 → 应用”中卸载程序，能干净地全部删除。',
+  'cl.better.winold': '更好的做法：Windows “磁盘清理” → “以前的 Windows 安装”。',
+  'cl.better.chat': '更好的做法：打开这个应用，使用它自带的存储清理。',
+  'cl.askTitle': '删除 {name}？', 'cl.iKnow': '我了解删除后的结果，仍要删除',
+});
+
+Object.assign(I18N.en, { 'cl.grid': 'Space map', 'cl.gridHint': 'each block is a folder, sized by its space — click one to find it in the list below', 'cl.gridRest': 'Smaller folders and files' });
+Object.assign(I18N.zh, { 'cl.grid': '空间分布图', 'cl.gridHint': '每个方块是一个文件夹，面积代表占用空间——点击即可跳到下方列表中的对应项', 'cl.gridRest': '较小的文件夹和文件' });
+
+// 2.5.0 finer kinds of file
+Object.assign(I18N.en, {
+  'cl.gridHint': 'blocks are folders sized by their space, split into their biggest subfolders — click one to find it in the list below', 'cl.gridFiles': 'Files and small folders',
+  'cl.level.safe': 'Can be deleted',
+  'cl.file.wsl': 'The virtual disk of a Linux system in WSL: the whole Linux installation and every file in it is lost.',
+  'cl.file.docker': 'Docker\'s virtual disk: all images, containers and their data are lost.',
+  'cl.file.phonebackup': 'An iPhone or iPad backup made with iTunes or Apple Devices. Without it the phone cannot be restored from this PC.',
+  'cl.file.gamesave': 'A game save: your progress in that game can be lost unless the game keeps it in the cloud.',
+  'cl.file.browser': 'Part of a browser profile — bookmarks, saved passwords, history, extensions or open tabs can be lost or the profile damaged.',
+  'cl.file.browsercache': 'A browser\'s cache: copies of websites kept so they load faster. The browser downloads them again; nothing of yours is lost.',
+  'cl.file.dump': 'A crash dump saved after a program or Windows crashed. Only needed to investigate that crash.',
+  'cl.file.log': 'A log file a program wrote. Only needed to look into a problem.',
+  'cl.file.pkgcache': 'A downloaded package in a developer tool\'s cache (npm, pip, Maven, NuGet, …). It is downloaded again when needed.',
+  'cl.file.appcache': 'A cache or temporary file of an app. The app makes it again when needed.',
+  'cl.file.database': 'An app\'s database — its saved data, not a cache. The app may lose data or stop working.',
+  'cl.better.wsl': 'Better: remove the Linux distribution with "wsl --unregister" or in Settings → Apps, after backing up what you need.',
+  'cl.better.docker': 'Better: clean up inside Docker Desktop (Troubleshoot → Clean / Purge data), or remove unused images there.',
+  'cl.better.phonebackup': 'Better: delete old backups in iTunes / Apple Devices → Manage backups.',
+  'cl.better.browser': 'Better: clear browsing data inside the browser — it only removes what you choose.',
+});
+Object.assign(I18N.zh, {
+  'cl.gridHint': '每个方块是一个文件夹，面积代表占用空间，并细分为它最大的子文件夹——点击即可跳到下方列表中的对应项', 'cl.gridFiles': '文件和较小的文件夹',
+  'cl.level.safe': '可以删除',
+  'cl.file.wsl': 'WSL 中 Linux 系统的虚拟磁盘：整个 Linux 系统及其中的所有文件都会丢失。',
+  'cl.file.docker': 'Docker 的虚拟磁盘：所有镜像、容器及其数据都会丢失。',
+  'cl.file.phonebackup': '用 iTunes 或“Apple 设备”做的 iPhone / iPad 备份。删除后无法再用本机恢复手机。',
+  'cl.file.gamesave': '游戏存档：除非游戏有云存档，否则这个游戏的进度可能丢失。',
+  'cl.file.browser': '浏览器配置文件的一部分——书签、保存的密码、历史记录、扩展或打开的标签页可能丢失，配置文件可能损坏。',
+  'cl.file.browsercache': '浏览器缓存：为加快打开网页保存的副本。浏览器会重新下载，你的东西不会丢失。',
+  'cl.file.dump': '程序或 Windows 崩溃后保存的转储文件。只在分析那次崩溃时需要。',
+  'cl.file.log': '程序写的日志文件。只在排查问题时需要。',
+  'cl.file.pkgcache': '开发工具缓存中下载的软件包（npm、pip、Maven、NuGet 等）。需要时会重新下载。',
+  'cl.file.appcache': '某个软件的缓存或临时文件。软件需要时会重新生成。',
+  'cl.file.database': '某个软件的数据库——它保存的数据，不是缓存。软件可能丢失数据或无法工作。',
+  'cl.better.wsl': '更好的做法：先备份需要的内容，再用“wsl --unregister”或在“设置 → 应用”中删除这个 Linux 发行版。',
+  'cl.better.docker': '更好的做法：在 Docker Desktop 中清理（Troubleshoot → Clean / Purge data），或删除不用的镜像。',
+  'cl.better.phonebackup': '更好的做法：在 iTunes /“Apple 设备”→“管理备份”中删除旧备份。',
+  'cl.better.browser': '更好的做法：在浏览器中“清除浏览数据”——只删除你选择的内容。',
+});
+
+// 2.5.0, Gemini's 2.5.0 review
+Object.assign(I18N.en, {
+  'cl.file.draft': 'A recovery copy or unsaved draft (Office, WPS or another editor). After a crash it may be the only copy of unsaved work.',
+  'cl.better.draft': 'Better: open the program it belongs to first — it usually offers to recover the document.',
+  'cl.file.database': 'A database — saved data of a program, not a cache (its -wal / -shm / -journal files are part of it). Records can be lost or the database damaged.',
+  'cl.recent': 'Changed in the last 24 hours: a program may be using it right now.',
+  'cl.toBin': 'It goes to the Recycle Bin, so you can restore it.',
+  'cl.tipTop': 'Click to find it in the list below', 'cl.tipSub': 'Click to open {dir} and find it there',
+});
+Object.assign(I18N.zh, {
+  'cl.file.draft': '恢复副本或未保存的草稿（Office、WPS 等编辑软件）。程序崩溃后，它可能是未保存内容的唯一副本。',
+  'cl.better.draft': '更好的做法：先打开它所属的程序，通常会提示恢复文档。',
+  'cl.file.database': '数据库——程序保存的数据，不是缓存（同名的 -wal / -shm / -journal 文件是它的一部分）。记录可能丢失，数据库可能损坏。',
+  'cl.recent': '最近 24 小时内修改过：可能正被某个程序使用。',
+  'cl.toBin': '它会移到回收站，可以恢复。',
+  'cl.tipTop': '点击在下方列表中定位', 'cl.tipSub': '点击进入 {dir} 并定位',
+});
+
 let LANG = 'en';
 
 function t(key, vars = {}) {
