@@ -1,0 +1,94 @@
+{
+ "changes": [
+  {
+   "level": 5,
+   "en": "What grew recently: Clean up compares full scans of a drive and shows the folders that grew most in the last 24 hours or 7 days, naming the deepest folder responsible",
+   "zh": "最近哪里变大了：空间清理比较磁盘的两次完整扫描，列出过去 24 小时或 7 天增长最多的文件夹，并指出真正导致增长的最深一层"
+  },
+  {
+   "level": 5,
+   "en": "Mass-change guard: when 100 or more files are changed, deleted or renamed within seconds (a script gone wrong, a sync conflict, ransomware), a red banner appears and one click puts every file back as it was before",
+   "zh": "大量变化防护：几秒内有 100 个以上文件被修改、删除或重命名（出错的脚本、同步冲突、勒索病毒）时显示红色横幅，一键把每个文件恢复到之前的样子"
+  },
+  {
+   "level": 5,
+   "en": "Move a big folder to another drive: copied, every file checked, a link left in its place so programs find it as before, and it can be moved back",
+   "zh": "大文件夹搬家：复制到其他磁盘并逐个文件核对，在原位置留下链接，程序照常能找到；随时可以搬回来"
+  },
+  {
+   "level": 5,
+   "en": "Move to a new PC: export the whole history as one file and import it on another PC; the history that was there is kept aside",
+   "zh": "换电脑：把整个历史记录导出为一个文件，在另一台电脑上导入；那台电脑原有的历史记录会另存一份"
+  },
+  {
+   "level": 5,
+   "en": "A folder as it was at any time: written as a copy next to it, with every file in the version it had then",
+   "zh": "文件夹在任意时刻的样子：在旁边写出一份副本，每个文件都是当时的版本"
+  },
+  {
+   "level": 5,
+   "en": "Similar photos: burst shots, edits and resized copies grouped together, the sharpest one marked",
+   "zh": "相似照片：把连拍、修图和缩放后的副本归为一组，标出最清晰的一张"
+  },
+  {
+   "level": 4,
+   "en": "Keep forever: a file whose every version is kept whatever the history limits say, and that Clean up never deletes",
+   "zh": "永久保留：文件的每个版本都会保留，不受历史记录期限影响，空间清理也绝不删除它"
+  },
+  {
+   "level": 4,
+   "en": "Undo a batch rename, find unsaved Office and WPS drafts after a crash, and name the program that has a file open when it cannot be restored or deleted",
+   "zh": "一键撤销批量重命名；程序崩溃后找回 Office 和 WPS 未保存的草稿；文件因被占用无法恢复或删除时，指出是哪个程序在使用它"
+  },
+  {
+   "level": 4,
+   "en": "New in Clean up: dependencies of old projects, other browsers' and graphics shader caches, older installer versions, broken shortcuts and empty folders, compression of large old files (nothing deleted), large Git repositories, chat apps' old received media (never their chat history), cloud folders on this PC vs online only, and possible leftovers of uninstalled programs",
+   "zh": "空间清理新增：旧项目的依赖、其他浏览器和显卡着色器缓存、安装包旧版本、失效快捷方式和空文件夹、压缩体积大的旧文件（不删除任何文件）、体积很大的 Git 仓库、聊天软件收到的旧媒体（绝不动聊天记录）、云同步文件夹在本机与仅联机的分布，以及可能是已卸载软件的残留"
+  },
+  {
+   "level": 4,
+   "en": "Duplicates can be kept in every place but stored once (hard links)",
+   "zh": "重复文件可以全部保留在原处，但在磁盘上只占一份空间（硬链接）"
+  },
+  {
+   "level": 3,
+   "en": "History: a time slider over every version, an evolution view with the copies made from a file, a comparison report to save as a web page, and badges saying whether a deleted file can be fully restored",
+   "zh": "历史记录：可在所有版本间拖动的时间轴、显示由文件复制出的副本的演变图、可保存为网页的对比报告，以及标明被删除文件能否完整找回的标记"
+  },
+  {
+   "level": 3,
+   "en": "Explorer: right-click a folder for the files deleted there; Ctrl+Alt+Z anywhere shows today's deleted and overwritten files",
+   "zh": "资源管理器：右键文件夹即可找回在那里删除的文件；在任何地方按 Ctrl+Alt+Z 显示今天删除和被覆盖的文件"
+  },
+  {
+   "level": 3,
+   "en": "Windows tools in Clean up (Disk Cleanup, Optimize drives, search index), each disk's health, a smaller hibernation file option, and Windows upgrade leftovers",
+   "zh": "空间清理中的 Windows 工具（磁盘清理、优化驱动器、搜索索引）、各磁盘的健康状态、缩小休眠文件，以及 Windows 升级残留"
+  },
+  {
+   "level": 3,
+   "en": "Names Windows cannot handle (ending in a space or dot, paths over 260 characters) are listed and can be fixed",
+   "zh": "列出 Windows 无法处理的文件名（以空格或句点结尾、路径超过 260 个字符），并可一键修正"
+  },
+  {
+   "level": 2,
+   "en": "Kept versions are checked in idle time; the tray turns green during busy moments and red on a mass change; a removable drive gets a card when plugged in; quieter on low battery and during presentations; Mica title bar on Windows 11; optional milestone cards",
+   "zh": "空闲时校验保存的版本；托盘图标在大量写入时变绿、出现大量变化时变红；插入移动硬盘时显示提示；低电量和演示时更安静；Windows 11 标题栏使用 Mica 效果；可关闭的里程碑提示"
+  },
+  {
+   "level": 1,
+   "en": "Renames are no longer paired with the wrong file when many files share the same size and time",
+   "zh": "大量文件大小和时间相同时，不再把重命名配错文件"
+  },
+  {
+   "level": 1,
+   "en": "Gemini review: a folder is never moved while any program has one of its files open (also programs that allow sharing), \"That was me\" silences the mass-change alert for 10 minutes, possible leftovers are worded more carefully and skip well-known vendors, and the extra Clean up lists sit in one folding section",
+   "zh": "Gemini 评审：只要有程序打开着文件夹中的任何文件（包括允许共享的程序），就不会搬家；“是我自己做的”会让大量变化提示静默 10 分钟；可能的残留文件夹用更谨慎的说法，并跳过知名厂商；空间清理的扩展列表收进一个可折叠的区域"
+  },
+  {
+   "level": 2,
+   "en": "Updating across several versions, the notes show only what you really get: features added and removed again in between are left out, and a removal is only mentioned if you had that feature",
+   "zh": "跨越多个版本更新时，更新说明只显示你实际得到的内容：中间加入又被移除的功能不再列出；只有你用过的功能被移除时才会提到"
+  }
+ ]
+}

@@ -84,8 +84,13 @@ def main():
         sys.exit('updates.py holds a different public key than installer\\keys\\release-key.json')
     upto = [{k: r[k] for k in ('version', 'date', 'changes', 'notes') if k in r}
             for r in releases[1:] if parse(r['version']) <= parse(rel['version'])]
+    gone = {f: v for f, v in (data.get('removed_features') or {}).items() if parse(v) <= parse(rel['version'])}
+    for r_ in upto:  # changes to a feature removed by this version are not worth reading about any more (2.6.0)
+        if 'changes' in r_:
+            r_['changes'] = [c for c in r_['changes'] if not (c.get('feature') in gone and parse(gone[c['feature']]) > parse(r_['version']))]
+    upto = [r_ for r_ in upto if r_.get('changes') or r_.get('notes') or 'changes' not in r_]  # nothing left: not listed
     out = ml.make_license(rel['version'], data.get('min_version', '1.6'), rel.get('notes') or {}, key,
-                          OUT / f"DeskTrace {rel['version']}{ml.updates.EXT}", changelog=upto)
+                          OUT / f"DeskTrace {rel['version']}{ml.updates.EXT}", changelog=upto, removed=gone)
     print(f'built {out}  ({out.stat().st_size / 1024:.0f} KB)')
 
 

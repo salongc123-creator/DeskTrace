@@ -301,6 +301,8 @@ class AppWindow:
         for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (newer / older Windows 10 builds)
             if dwmapi.DwmSetWindowAttribute(self.hwnd, attr, ctypes.byref(v), 4) == 0:
                 break
+        mica = ctypes.c_int(2)  # DWMWA_SYSTEMBACKDROP_TYPE = 38, DWMSBT_MAINWINDOW (Mica): Windows 11 22H2+, ignored before (2.6.0 #42)
+        dwmapi.DwmSetWindowAttribute(self.hwnd, 38, ctypes.byref(mica), 4)
 
     def start_webview(self):
         dll_path = find_runtime()

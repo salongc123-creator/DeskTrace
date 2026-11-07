@@ -26,8 +26,12 @@
 - See **exactly what changed** between versions of Word, Excel, PowerPoint, PDF, Markdown, text and code files, and preview images and archives.
 - Search by name or by **content** (Chinese included). Add notes to versions, star files, export the list to Excel.
 - An unplugged drive or a network folder that is away is never taken for "everything deleted".
+- **Mass-change guard:** if many files are changed, deleted or renamed within seconds (a script gone wrong, ransomware), a red banner appears and one click puts them all back.
+- See a whole folder **as it was at any time**, undo a batch rename, rescue unsaved Office/WPS drafts, **keep forever** the files that matter, and move your whole history **to a new PC** in one file.
 
 **Clean up**
+- **What grew recently:** compares scans of a drive and names the folders that grew most in the last day or week.
+- **Move a big folder to another drive** safely (every file checked, a link left in its place), and find similar photos, old project dependencies, large Git repositories, cloud folders' local copies and more.
 - Shows what takes up the space on any drive, with charts by folder and file type, and the biggest files.
 - A **space map** shows every folder as a block sized by its space, split into its biggest subfolders — click one to jump to it in the list. Reading a drive uses several worker processes sharing one queue (1.86 million files in about 35 s on the test PC).
 - **Any listed file can be deleted**, with a plain explanation of what it is, what deleting it does and what is better; risky kinds (programs, databases, drafts, browser profiles, WSL/Docker disks, phone backups, game saves, …) need a confirmation tick. Core Windows files are never listed. Files go to the Recycle Bin, and a cleanup can be **put back** later.
@@ -118,6 +122,8 @@ Bug reports and ideas are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 - 移动硬盘拔出或网络文件夹断开，绝不会被当作“全部删除”。
 
 **空间清理**
+- **最近哪里变大了**：比较磁盘的两次扫描，指出最近一天或一周增长最多的文件夹。
+- **大文件夹搬家**：逐个文件核对后搬到其他磁盘，原位置留下链接；还能找出相似照片、旧项目依赖、体积很大的 Git 仓库、云同步文件夹的本机副本等。
 - 显示任意磁盘的空间用途：按文件夹、按文件类型的图表，以及最大的文件。
 - **空间分布图**：每个文件夹是一个方块，面积代表占用空间，并细分为子文件夹，点击即可跳到列表中的对应项。读取磁盘时多个工作进程共享任务队列（测试电脑上 186 万个文件约 35 秒）。
 - **列出的任何文件都可以删除**：用大白话说明它是什么、删除后会怎样、有什么更好的做法；有风险的类别（程序、数据库、草稿、浏览器配置、WSL/Docker 磁盘、手机备份、游戏存档等）需要勾选确认。Windows 核心文件不会列出。文件移到回收站，之后可以**放回原处**。

@@ -1226,6 +1226,301 @@ Object.assign(I18N.zh, {
   'cl.tipTop': '点击在下方列表中定位', 'cl.tipSub': '点击进入 {dir} 并定位',
 });
 
+// 2.6.0 #1 Space Spikes Radar
+Object.assign(I18N.en, {
+  'gr.title': 'What grew recently', 'gr.days1': '24 hours', 'gr.days7': '7 days',
+  'gr.lead': 'Between the full scans of {span} the drive grew by {total}. The folders that grew most:',
+  'gr.leadShrunk': 'Between the full scans of {span} the drive shrank by {total}. Folders that still grew:',
+  'gr.none': 'No folder grew by 100 MB or more.', 'gr.newFolder': 'new folder', 'gr.was': 'was {size}',
+  'gr.notReady': 'Needs two full scans of this drive to compare ({n} so far). DeskTrace reads the drive again in the background every 12 hours while the PC is idle — or run a full scan now and another later.',
+});
+Object.assign(I18N.zh, {
+  'gr.title': '最近哪里变大了', 'gr.days1': '24 小时', 'gr.days7': '7 天',
+  'gr.lead': '在 {span} 的两次完整扫描之间，这个磁盘多用了 {total}。增长最多的文件夹：',
+  'gr.leadShrunk': '在 {span} 的两次完整扫描之间，这个磁盘少用了 {total}。仍在增长的文件夹：',
+  'gr.none': '没有文件夹增长 100 MB 以上。', 'gr.newFolder': '新文件夹', 'gr.was': '原为 {size}',
+  'gr.notReady': '需要这个磁盘的两次完整扫描才能比较（目前 {n} 次）。电脑空闲时桌迹每 12 小时会在后台重新读取一次——也可以现在完整扫描一次，稍后再扫描一次。',
+});
+
+// 2.6.0 #18, #36
+Object.assign(I18N.en, {
+  'cl.item.otherbrowsers': 'Other browsers\' caches (Brave, Opera, Vivaldi, 360, QQ)',
+  'cl.why.otherbrowsers': 'Copies of websites these browsers keep so pages load faster. Bookmarks, passwords and history are not deleted; files an open browser is using are skipped.',
+  'cl.item.shaders': 'Graphics shader caches (NVIDIA, AMD, Intel, DirectX)',
+  'cl.why.shaders': 'Compiled shaders the graphics driver keeps for games and apps. They are made again when needed — the first start of a game may take a little longer. Files changed in the last two days are left alone.',
+});
+Object.assign(I18N.zh, {
+  'cl.item.otherbrowsers': '其他浏览器缓存（Brave、Opera、Vivaldi、360、QQ）',
+  'cl.why.otherbrowsers': '这些浏览器为加快打开网页保存的副本。不会删除书签、密码和历史记录；正在运行的浏览器占用的文件会被跳过。',
+  'cl.item.shaders': '显卡着色器缓存（NVIDIA、AMD、Intel、DirectX）',
+  'cl.why.shaders': '显卡驱动为游戏和软件编译好的着色器。需要时会重新生成——游戏第一次启动可能稍慢。两天内修改过的文件不会动。',
+});
+
+// 2.6.0 #16 restorability
+Object.assign(I18N.en, { 'rs.ok': 'Full copy kept', 'rs.okWhy': 'DeskTrace kept the whole file: Restore brings it back exactly as it was.',
+  'rs.no': 'No copy — check the Recycle Bin', 'rs.noWhy': 'DeskTrace recorded the deletion but has no copy (too large, online-only, or removed to save space). It may still be in the Recycle Bin.' });
+Object.assign(I18N.zh, { 'rs.ok': '有完整副本', 'rs.okWhy': '桌迹保存了整个文件：点“恢复”即可原样找回。',
+  'rs.no': '无副本——请查看回收站', 'rs.noWhy': '桌迹记录了这次删除，但没有副本（文件过大、仅联机，或为节省空间已清除）。它可能仍在回收站中。' });
+
+// 2.6.0 #17, #25, #49: Windows' own tools
+Object.assign(I18N.en, {
+  'wt.title': 'Windows tools', 'wt.cleanmgr': 'Disk Cleanup', 'wt.cleanmgrWhy': 'Windows\' own cleanup: update leftovers, previous Windows installation, system files (asks for administrator rights).',
+  'wt.optimize': 'Optimize drives', 'wt.optimizeWhy': 'Windows\' "Optimize Drives": TRIM for SSDs, defragmentation for hard disks.',
+  'wt.index': 'Search index', 'wt.indexWhy': 'Indexing Options: choose what Windows Search indexes, or rebuild an index that has grown very large (Advanced → Rebuild).',
+  'cl.hiberReduced': 'Make it smaller', 'cl.hiberReducedWhy': 'A reduced hibernation file keeps fast startup but not hibernate; it takes about half the space. Windows asks for administrator rights.',
+  'cl.hiberAsked': 'Windows asks for permission; the space changes once it is done.',
+});
+Object.assign(I18N.zh, {
+  'wt.title': 'Windows 工具', 'wt.cleanmgr': '磁盘清理', 'wt.cleanmgrWhy': 'Windows 自带的清理：更新残留、以前的 Windows 安装、系统文件（需要管理员权限）。',
+  'wt.optimize': '优化驱动器', 'wt.optimizeWhy': 'Windows 的“优化驱动器”：固态硬盘执行 TRIM，机械硬盘进行碎片整理。',
+  'wt.index': '搜索索引', 'wt.indexWhy': '索引选项：选择 Windows 搜索要索引的位置，或重建体积过大的索引（高级 → 重建）。',
+  'cl.hiberReduced': '缩小休眠文件', 'cl.hiberReducedWhy': '精简的休眠文件保留快速启动、但不能休眠，约占一半空间。Windows 会请求管理员权限。',
+  'cl.hiberAsked': 'Windows 会请求许可；完成后空间才会变化。',
+});
+
+// 2.6.0 #8
+Object.assign(I18N.en, {
+  'cl.item.devprojects': 'Dependencies of old projects (node_modules, Rust target, Python venv)',
+  'cl.why.devprojects': 'Folders a build tool fills again — node_modules next to package.json, Rust target next to Cargo.toml, Python virtual environments — in projects you have not changed for 30 days. Your source code is not touched; run npm install, cargo build or recreate the venv to get them back.',
+});
+Object.assign(I18N.zh, {
+  'cl.item.devprojects': '旧项目的依赖（node_modules、Rust target、Python 虚拟环境）',
+  'cl.why.devprojects': '构建工具会重新生成的文件夹——package.json 旁的 node_modules、Cargo.toml 旁的 Rust target、Python 虚拟环境——只限 30 天未改动的项目。不会动你的源代码；需要时运行 npm install、cargo build 或重建虚拟环境即可。',
+});
+
+// 2.6.0 #40
+Object.assign(I18N.en, { 'rb.btn': 'Undo these {n} renames', 'rb.title': 'Give {n} files their old names back?',
+  'rb.text': 'Each file gets the name (and folder) it had before. A file whose old name is in use again, or that is gone or open in another program, is left as it is — nothing is overwritten.',
+  'rb.go': 'Rename back', 'rb.done': '{n} files have their old names again.', 'rb.partly': '{n} files renamed back; {m} left as they are (old name in use, gone or open elsewhere).' });
+Object.assign(I18N.zh, { 'rb.btn': '撤销这 {n} 次重命名', 'rb.title': '把 {n} 个文件改回原来的名字？',
+  'rb.text': '每个文件都会改回之前的名字（和文件夹）。原名字已被占用、文件已不存在或正被其他程序打开时，该文件保持不变——不会覆盖任何文件。',
+  'rb.go': '改回原名', 'rb.done': '已有 {n} 个文件改回原名。', 'rb.partly': '已改回 {n} 个；{m} 个保持不变（原名已被占用、文件不存在或正被打开）。' });
+
+// 2.6.0 #6 mass change guard
+Object.assign(I18N.en, {
+  'warn.mass': 'Many files changed at once:', 'warn.massWhy': 'within seconds, many files in your folders were changed, deleted or renamed — a script gone wrong, a sync conflict or ransomware can do this. DeskTrace kept their earlier versions.',
+  'mass.restore': 'Put them all back', 'mass.dismiss': 'That was me',
+  'mass.title': 'Put {n} changes back?', 'mass.text': 'Every file changed, deleted or renamed between {from} and {to} gets back the version it had just before. A changed file is replaced (its current content stays in the history, so this can be undone too); deleted files come back; renamed files get their old names. New files are left alone. If this is ransomware, first disconnect the PC from the network.',
+  'mass.go': 'Put them all back', 'mass.done': '{n} files put back as they were. {m} could not be (no earlier copy, in use, or the name is taken).',
+});
+Object.assign(I18N.zh, {
+  'warn.mass': '大量文件同时发生变化：', 'warn.massWhy': '几秒钟内，你的文件夹中有大量文件被修改、删除或重命名——出错的脚本、同步冲突或勒索病毒都可能造成这种情况。桌迹保存了它们之前的版本。',
+  'mass.restore': '全部恢复', 'mass.dismiss': '是我自己做的',
+  'mass.title': '恢复这 {n} 处变化？', 'mass.text': '{from} 到 {to} 之间被修改、删除或重命名的每个文件，都会恢复为变化之前的版本：被修改的文件会被替换（当前内容仍保留在历史中，所以这一步也可以撤销）；被删除的文件会找回；被重命名的文件改回原名。新建的文件不会动。如果怀疑是勒索病毒，请先断开网络。',
+  'mass.go': '全部恢复', 'mass.done': '已将 {n} 个文件恢复原样。{m} 个无法恢复（没有更早的副本、正被使用，或原名已被占用）。',
+});
+
+// 2.6.0 #34
+Object.assign(I18N.en, { 'dk.ok': 'healthy', 'dk.bad': 'Windows reports "{s}" — back up your files now',
+  'dk.why': 'The disk\'s own health as Windows reports it. Detailed wear and error counters need administrator rights and are not shown.' });
+Object.assign(I18N.zh, { 'dk.ok': '健康', 'dk.bad': 'Windows 报告“{s}”——请立即备份文件',
+  'dk.why': 'Windows 报告的磁盘自身健康状态。详细的磨损和错误计数需要管理员权限，这里不显示。' });
+
+// 2.6.0 #33
+Object.assign(I18N.en, { 'cl.item.oldinstallers': 'Older versions of installers in Downloads',
+  'cl.why.oldinstallers': 'Setup files that have a newer version of the same program next to them in Downloads. The newest one stays; the older ones go to the Recycle Bin.' });
+Object.assign(I18N.zh, { 'cl.item.oldinstallers': '下载文件夹中安装包的旧版本',
+  'cl.why.oldinstallers': '下载文件夹中同一软件已有更新版本的安装包。保留最新的一个，旧的移到回收站。' });
+
+// 2.6.0 #12
+Object.assign(I18N.en, { 'cl.item.brokenlinks': 'Broken shortcuts and empty folders',
+  'cl.why.brokenlinks': 'Shortcuts on the Desktop and in the Start menu whose program or file no longer exists (left by uninstalled programs), and folders in Downloads with nothing inside. They go to the Recycle Bin.' });
+Object.assign(I18N.zh, { 'cl.item.brokenlinks': '失效的快捷方式和空文件夹',
+  'cl.why.brokenlinks': '桌面和开始菜单中指向的程序或文件已不存在的快捷方式（多为已卸载软件留下的），以及下载文件夹中完全为空的文件夹。它们会移到回收站。' });
+
+// 2.6.0 #2
+Object.assign(I18N.en, { 'lo.title': 'Possibly left by uninstalled programs', 'lo.hint': 'folders in AppData / ProgramData whose name matches no installed program — check before deleting',
+  'lo.del': 'Delete', 'lo.askTitle': 'Delete the folder {name}?',
+  'lo.askText': '{path} ({size}) matches no installed program, so it was probably left behind when a program was uninstalled. A program that is still in use may keep its data here under a different name — then its settings or data are lost. The folder goes to the Recycle Bin and can be restored from there.',
+  'lo.done': '{name} moved to the Recycle Bin ({size}).' });
+Object.assign(I18N.zh, { 'lo.title': '可能是已卸载软件的残留', 'lo.hint': 'AppData / ProgramData 中名字与任何已安装软件都对不上的文件夹——删除前请确认',
+  'lo.del': '删除', 'lo.askTitle': '删除文件夹 {name}？',
+  'lo.askText': '{path}（{size}）与任何已安装的软件都对不上，很可能是卸载软件时留下的。但仍在使用的软件也可能用别的名字把数据放在这里——那样它的设置或数据会丢失。文件夹会移到回收站，可以从回收站恢复。',
+  'lo.done': '已将 {name} 移到回收站（{size}）。' });
+
+// 2.6.0 #19
+Object.assign(I18N.en, { 'err.lockedBy': 'It is open in: {apps}.' });
+Object.assign(I18N.zh, { 'err.lockedBy': '正在使用它的程序：{apps}。' });
+
+// 2.6.0 #20
+Object.assign(I18N.en, { 'pin.add': 'Keep forever', 'pin.remove': 'Kept forever', 'pin.why': 'Every version of this file is kept, whatever the history limits say, and Clean up never deletes it.',
+  'pin.done': 'Every version of {name} is kept forever now.', 'pin.undone': '{name} follows the normal history limits again.',
+  'err.pinned': 'This file is set to "Keep forever". Switch that off first if you really want to remove it.' });
+Object.assign(I18N.zh, { 'pin.add': '永久保留', 'pin.remove': '已永久保留', 'pin.why': '这个文件的每个版本都会保留，不受历史记录期限和空间上限影响；空间清理也绝不会删除它。',
+  'pin.done': '{name} 的每个版本现在都会永久保留。', 'pin.undone': '{name} 恢复按普通的历史记录期限保留。',
+  'err.pinned': '这个文件已设为“永久保留”。如确实要删除，请先取消永久保留。' });
+
+// 2.6.0 #9
+Object.assign(I18N.en, { 'cl.item.winupgrade': 'Windows upgrade leftovers ($Windows.~BT, $Windows.~WS, $SysReset)',
+  'cl.why.winupgrade': 'Files Windows kept from an upgrade or a reset. Once the upgrade is finished they are not needed; Windows Disk Cleanup (Clean up system files → Temporary Windows installation files / Windows upgrade log files) removes them with administrator rights.' });
+Object.assign(I18N.zh, { 'cl.item.winupgrade': 'Windows 升级残留（$Windows.~BT、$Windows.~WS、$SysReset）',
+  'cl.why.winupgrade': 'Windows 升级或重置时保留的文件。升级完成后就不再需要；用 Windows“磁盘清理”（清理系统文件 → 临时 Windows 安装文件 / Windows 升级日志文件）可以用管理员权限删除。' });
+
+// 2.6.0 #15
+Object.assign(I18N.en, { 'cl.item.compress': 'Compress large old files (nothing is deleted)', 'cl.how.compress': 'Compressed · stays usable',
+  'cl.why.compress': 'Logs, text, CSV, SQL, uncompressed pictures and sound of 20 MB or more in your folders, unchanged for 90 days. Windows\' own NTFS compression makes them take less space — often about half — while they open and work exactly as before. Nothing is deleted; "Uncompress" in the file\'s Properties undoes it.' });
+Object.assign(I18N.zh, { 'cl.item.compress': '压缩体积大的旧文件（不删除任何文件）', 'cl.how.compress': '压缩 · 照常使用',
+  'cl.why.compress': '你文件夹中 20 MB 以上、90 天未修改的日志、文本、CSV、SQL、未压缩的图片和音频。用 Windows 自带的 NTFS 压缩减少占用空间——通常约一半——打开和使用完全照旧。不删除任何文件；在文件“属性”中取消压缩即可还原。' });
+
+// 2.6.0 #29
+Object.assign(I18N.en, { 'git.title': 'Large Git repositories', 'git.hint': 'their history (.git) takes a lot of space',
+  'git.gc': 'Tidy up', 'git.gcWhy': 'Runs Git\'s own clean-up (git gc --prune=now): packs the history and removes what nothing refers to. Your files and commits stay.',
+  'git.running': 'Tidying…', 'git.done': 'Git tidied the repository: {size} freed.', 'git.failed': 'Git could not tidy this repository (is another Git program using it?).',
+  'git.noGit': 'Git is not installed, so DeskTrace cannot tidy them; the sizes are shown for information.' });
+Object.assign(I18N.zh, { 'git.title': '体积很大的 Git 仓库', 'git.hint': '它们的历史（.git）占用了大量空间',
+  'git.gc': '整理', 'git.gcWhy': '运行 Git 自带的整理（git gc --prune=now）：打包历史，删除不再被引用的内容。你的文件和提交都会保留。',
+  'git.running': '正在整理…', 'git.done': 'Git 已整理这个仓库，释放 {size}。', 'git.failed': 'Git 无法整理这个仓库（是否有其他 Git 程序正在使用它？）。',
+  'git.noGit': '未安装 Git，桌迹无法整理它们；这里只显示大小供参考。' });
+
+// 2.6.0 #22 Outlook data files
+Object.assign(I18N.en, {
+  'cl.better.pst': 'Better: in Outlook use File → Tools → Mailbox Cleanup (or Clean Up Old Items to archive), empty Deleted Items, then File → Account Settings → Data Files → Settings → Compact Now.',
+  'cl.better.ost': 'Better: in Outlook, Account Settings → change "Mail to keep offline" to a shorter period (for example 1 year); Outlook shrinks the file itself. Deleting it makes Outlook download the whole mailbox again.' });
+Object.assign(I18N.zh, {
+  'cl.better.pst': '更好的做法：在 Outlook 中使用“文件 → 工具 → 邮箱清理”（或“清理旧项目”进行归档），清空“已删除邮件”，然后“文件 → 账户设置 → 数据文件 → 设置 → 立即压缩”。',
+  'cl.better.ost': '更好的做法：在 Outlook“账户设置”中把“脱机保留的邮件”改为较短的时间（例如 1 年），Outlook 会自行缩小这个文件。删除它会让 Outlook 重新下载整个邮箱。' });
+
+// 2.6.0 #44
+Object.assign(I18N.en, { 'mv.export': 'Export for another PC…', 'mv.exportWhy': 'The whole history — every kept version, changes, notes and settings — as one .dtbackup file.',
+  'mv.import': 'Import from another PC…', 'mv.importWhy': 'Use a .dtbackup file made on another PC. It takes effect the next time DeskTrace starts; the history on this PC is kept aside, not deleted.',
+  'mv.staged': 'The imported history is ready. Quit DeskTrace and open it again to use it; the history that was here is kept in a folder next to it.',
+  'err.notBackup': 'This is not a DeskTrace history file.', 'err.damaged': 'This history file is damaged; nothing was changed.', 'err.busy': 'A backup is already running.' });
+Object.assign(I18N.zh, { 'mv.export': '导出到新电脑…', 'mv.exportWhy': '把整个历史记录——所有保存的版本、变化记录、备注和设置——打包成一个 .dtbackup 文件。',
+  'mv.import': '从旧电脑导入…', 'mv.importWhy': '使用在另一台电脑上导出的 .dtbackup 文件。下次启动桌迹时生效；本机原有的历史记录会另存一份，不会删除。',
+  'mv.staged': '导入的历史记录已准备好。退出桌迹并重新打开即可使用；本机原来的历史记录会保存在旁边的文件夹中。',
+  'err.notBackup': '这不是桌迹的历史记录文件。', 'err.damaged': '这个历史记录文件已损坏，没有做任何改动。', 'err.busy': '已有一个备份正在进行。' });
+
+// 2.6.0 #31
+Object.assign(I18N.en, { 'fa.lead': 'Need this whole folder as it was at an earlier time?', 'fa.btn': 'Folder as of a time',
+  'fa.title': '{name} as it was at…', 'fa.text': 'DeskTrace writes the folder as it was at that moment — every file that existed then, in the version it had then — into a new folder next to it. Nothing in the folder itself is changed.',
+  'fa.go': 'Write the copy', 'fa.done': '{n} files written to {path}. {m} had no kept copy from that time.' });
+Object.assign(I18N.zh, { 'fa.lead': '需要把整个文件夹恢复到之前某个时刻的样子？', 'fa.btn': '文件夹某一时刻的样子',
+  'fa.title': '{name} 在某一时刻的样子', 'fa.text': '桌迹会把文件夹在那一时刻的样子——当时存在的每个文件、当时的版本——写入旁边的一个新文件夹。原文件夹不会有任何改动。',
+  'fa.go': '写出副本', 'fa.done': '已将 {n} 个文件写入 {path}。{m} 个文件没有那个时刻的副本。' });
+
+// 2.6.0 #26
+Object.assign(I18N.en, { 'rep.btn': 'Export comparison', 'rep.why': 'Save this change as a web page: removed lines red, added lines green, changed words marked — to send or print.',
+  'rep.done': 'Comparison saved: {path}', 'err.noDiff': 'There is no text comparison for this change.' });
+Object.assign(I18N.zh, { 'rep.btn': '导出对比报告', 'rep.why': '把这次修改保存为网页：删除的行为红色、新增的行为绿色、改动的词会标出——方便发送或打印。',
+  'rep.done': '对比报告已保存：{path}', 'err.noDiff': '这次修改没有可对比的文字内容。' });
+
+// 2.6.0 #13
+Object.assign(I18N.en, { 'hl.btn': 'Keep all, store once', 'hl.why': 'Every copy stays where it is under its name, but the disk holds the content only once (NTFS hard links).',
+  'hl.title': 'Store these {n} copies once?', 'hl.text': 'Every copy keeps its name and place, and programs find them as before — but they become one file on the disk. From then on, editing any of them changes all of them. Copies on another drive, changed meanwhile or open in a program are left as they are.',
+  'hl.go': 'Store once', 'hl.done': '{n} copies now share one file: {size} freed. {m} left as they were.',
+  'err.notNtfs': 'This drive does not support hard links (it is not NTFS).' });
+Object.assign(I18N.zh, { 'hl.btn': '全部保留，只占一份空间', 'hl.why': '每个副本都留在原处、名字不变，但磁盘上只保存一份内容（NTFS 硬链接）。',
+  'hl.title': '让这 {n} 个副本只占一份空间？', 'hl.text': '每个副本的名字和位置都不变，程序照常能找到它们——但它们在磁盘上会变成同一个文件。从此修改其中任何一个，其他的也会一起改变。位于其他磁盘、期间被修改过或正被程序打开的副本保持不变。',
+  'hl.go': '只占一份空间', 'hl.done': '已有 {n} 个副本共用一个文件，释放 {size}。{m} 个保持不变。',
+  'err.notNtfs': '这个磁盘不支持硬链接（不是 NTFS）。' });
+
+// 2.6.0 #3
+Object.assign(I18N.en, { 'mvf.btn': 'Move to another drive', 'mvf.why': 'Moves the folder to another drive and leaves a link in its place, so programs find it as before.',
+  'mvf.title': 'Move {name} to another drive?', 'mvf.text': 'The folder ({size}) is copied to the drive you choose, every file is checked against the original, and a link (NTFS junction) is put in its place — programs keep using the same path. Only then is the original deleted. Close the programs using it first; if a file is open, nothing happens. You can move it back any time.',
+  'mvf.noDrive': 'No other fixed NTFS drive has enough free space.', 'mvf.sure': 'Close programs using this folder; I understand it is moved', 'mvf.go': 'Move',
+  'mvf.step.start': 'Starting…', 'mvf.step.copy': 'Copying {total} files…', 'mvf.step.verify': 'Checking {n} of {total} files…',
+  'mvf.done': 'Folder moved; its old place now links to the new one.', 'mvf.failed': 'The folder was not moved and is as it was ({why}).',
+  'mvf.listTitle': 'Folders moved to another drive', 'mvf.back': 'Move back', 'mvf.backTitle': 'Move this folder back?', 'mvf.backText': 'The folder is copied back, checked, and the copy on the other drive is removed.',
+  'err.noSpace': 'Not enough free space on that drive.', 'err.moveFailed': 'The move did not work; nothing was changed.' });
+Object.assign(I18N.zh, { 'mvf.btn': '搬到其他磁盘', 'mvf.why': '把文件夹移到其他磁盘，并在原位置留一个链接，程序照常能找到它。',
+  'mvf.title': '把 {name} 搬到其他磁盘？', 'mvf.text': '文件夹（{size}）会复制到你选择的磁盘，逐个文件与原文件比对，然后在原位置放一个链接（NTFS 目录联接）——程序继续使用原来的路径。之后才删除原文件夹。请先关闭使用它的程序；如有文件正被打开，什么都不会发生。随时可以搬回来。',
+  'mvf.noDrive': '没有其他空间足够的 NTFS 固定磁盘。', 'mvf.sure': '已关闭使用这个文件夹的程序，我知道它会被搬走', 'mvf.go': '搬家',
+  'mvf.step.start': '正在开始…', 'mvf.step.copy': '正在复制 {total} 个文件…', 'mvf.step.verify': '正在核对第 {n} / {total} 个文件…',
+  'mvf.done': '文件夹已搬走；原位置现在链接到新位置。', 'mvf.failed': '文件夹没有搬走，保持原样（{why}）。',
+  'mvf.listTitle': '已搬到其他磁盘的文件夹', 'mvf.back': '搬回来', 'mvf.backTitle': '把这个文件夹搬回来？', 'mvf.backText': '文件夹会复制回来并核对，然后删除其他磁盘上的那份。',
+  'err.noSpace': '那个磁盘的可用空间不够。', 'err.moveFailed': '搬家没有成功，没有做任何改动。' });
+
+// 2.6.0 #24
+Object.assign(I18N.en, { 'dr.title': 'Unsaved drafts from the last 7 days', 'dr.lead': 'Recovery copies Office and WPS kept after a crash or when a document was closed without saving. Save a copy to open it safely.',
+  'dr.save': 'Save a copy', 'dr.saved': 'Copy saved: {path}' });
+Object.assign(I18N.zh, { 'dr.title': '最近 7 天未保存的草稿', 'dr.lead': 'Office 和 WPS 在程序崩溃或未保存就关闭文档时留下的恢复副本。先保存一份副本再打开，更安全。',
+  'dr.save': '保存一份副本', 'dr.saved': '副本已保存：{path}' });
+
+// 2.6.0 #50
+Object.assign(I18N.en, { 'ms.restored': 'DeskTrace has now brought back {n} files for you.', 'ms.freed': 'Clean up has now freed {n} on your drives.' });
+Object.assign(I18N.zh, { 'ms.restored': '桌迹已经帮你找回了 {n} 个文件。', 'ms.freed': '空间清理已经为你的磁盘腾出了 {n}。' });
+
+Object.assign(I18N.en, { 'set.milestones': 'Milestone cards', 'set.milestonesHint': 'A short note when DeskTrace has brought back 10, 100 or 1000 files, or Clean up has freed 10 GB, 100 GB or 1 TB.' });
+Object.assign(I18N.zh, { 'set.milestones': '里程碑提示', 'set.milestonesHint': '桌迹找回 10、100、1000 个文件，或空间清理腾出 10 GB、100 GB、1 TB 时，显示一条简短提示。' });
+
+// 2.6.0 #7
+Object.assign(I18N.en, { 'ch.btn': 'Old received pictures and videos', 'ch.title': '{app}: old received media',
+  'ch.text': 'Pictures, videos and files you received in chats, and the app\'s caches — only those older than the period below. They go to the Recycle Bin. In the chats they show as expired or need downloading again, and some may no longer be available.',
+  'ch.older': 'Older than', 'ch.days': '{n} days', 'ch.k.picture': 'Pictures', 'ch.k.video': 'Videos', 'ch.k.file': 'Received files', 'ch.k.cache': 'Caches (moments, thumbnails, temporary files)',
+  'ch.never': 'Chat history (the databases), settings and backups are never touched.', 'ch.done': '{n} files moved to the Recycle Bin, {size} freed once it is emptied.' });
+Object.assign(I18N.zh, { 'ch.btn': '清理收到的旧图片和视频', 'ch.title': '{app}：收到的旧媒体文件',
+  'ch.text': '聊天中收到的图片、视频、文件，以及应用的缓存——只限下面所选时间以前的。它们会移到回收站。聊天中这些内容会显示为过期或需要重新下载，有些可能已无法再下载。',
+  'ch.older': '早于', 'ch.days': '{n} 天', 'ch.k.picture': '图片', 'ch.k.video': '视频', 'ch.k.file': '收到的文件', 'ch.k.cache': '缓存（朋友圈、缩略图、临时文件）',
+  'ch.never': '聊天记录（数据库）、设置和备份绝不会动。', 'ch.done': '已将 {n} 个文件移到回收站，清空回收站后释放 {size}。' });
+
+// 2.6.0 #27, #28
+Object.assign(I18N.en, { 'lp.title': 'Language packs of programs ({size})', 'lp.hint': 'languages other than English and Chinese that programs carry — shown for information: removing them breaks updates of some programs, so DeskTrace does not offer it',
+  'cl.better.wsl': 'Better: to make the disk smaller without losing anything, run "wsl --manage <distribution> --set-sparse true" (WSL 2.0 or later) or, with WSL shut down, Optimize-VHD in an administrator PowerShell. To remove the distribution, back up first, then "wsl --unregister".',
+  'cl.better.docker': 'Better: in Docker Desktop use Troubleshoot → Clean / Purge data, or remove unused images; Docker Desktop also compacts its disk itself (Settings → Resources).' });
+Object.assign(I18N.zh, { 'lp.title': '软件语言包（{size}）', 'lp.hint': '各软件自带的英文和中文以外的语言——仅供参考：删除会导致部分软件更新出错，所以桌迹不提供删除',
+  'cl.better.wsl': '更好的做法：想在不丢失任何内容的情况下缩小磁盘，可运行“wsl --manage <发行版> --set-sparse true”（WSL 2.0 及以上），或在关闭 WSL 后用管理员 PowerShell 运行 Optimize-VHD。要删除发行版，请先备份，再运行“wsl --unregister”。',
+  'cl.better.docker': '更好的做法：在 Docker Desktop 中使用 Troubleshoot → Clean / Purge data，或删除不用的镜像；Docker Desktop 也会自行压缩它的磁盘（设置 → Resources）。' });
+
+// 2.6.0 #35
+Object.assign(I18N.en, { 'bn.title': 'Names Windows cannot handle', 'bn.hint': 'Explorer cannot open, rename or delete these',
+  'bn.trailing': 'name ends with a space or a dot', 'bn.long': 'path longer than 260 characters', 'bn.fix': 'Fix the name',
+  'bn.done': 'Renamed: {path}' });
+Object.assign(I18N.zh, { 'bn.title': 'Windows 无法处理的文件名', 'bn.hint': '资源管理器无法打开、重命名或删除它们',
+  'bn.trailing': '名字以空格或句点结尾', 'bn.long': '路径超过 260 个字符', 'bn.fix': '修正名字',
+  'bn.done': '已重命名：{path}' });
+
+// 2.6.0 #30
+Object.assign(I18N.en, { 'cd.title': 'Cloud-synced folders', 'cd.hint': 'size = what is stored on this PC', 'cd.counts': '{n} on this PC, {m} online only',
+  'cd.free': 'Keep all online only', 'cd.why': 'Frees the copies on this PC; every file stays in the cloud and in the folder, and downloads again when you open it.',
+  'cd.askTitle': 'Keep every file of this folder online only?', 'cd.askText': 'The cloud service removes the copies from this PC. Every file stays in the cloud and shows in the folder as before; opening one downloads it (internet needed). Files you marked "Always keep on this device" are included.',
+  'cd.done': 'Asked the cloud service to free the copies; the space comes back as it works through them.' });
+Object.assign(I18N.zh, { 'cd.title': '云同步文件夹', 'cd.hint': '大小 = 存在本机上的部分', 'cd.counts': '本机 {n} 个，仅联机 {m} 个',
+  'cd.free': '全部仅保留在线', 'cd.why': '释放本机上的副本；每个文件仍保留在云端和文件夹中，打开时会重新下载。',
+  'cd.askTitle': '让这个文件夹的所有文件仅保留在线？', 'cd.askText': '云服务会删除本机上的副本。每个文件仍保留在云端，并照常显示在文件夹中；打开时会下载（需要联网）。标记为“始终保留在此设备上”的文件也包括在内。',
+  'cd.done': '已请云服务释放副本；它处理完后空间会逐渐回来。' });
+
+// 2.6.0 #14
+Object.assign(I18N.en, { 'help.hotkey': 'Anywhere in Windows: today\'s deleted and overwritten files' });
+Object.assign(I18N.zh, { 'help.hotkey': '在 Windows 任何地方：今天删除和被覆盖的文件' });
+
+// 2.6.0 #21
+Object.assign(I18N.en, { 'usb.text': '{d} {label} plugged in: {free} free of {total}. To keep versions of files on it, add one of its folders in Settings → Folders.', 'usb.look': 'See what is on it' });
+Object.assign(I18N.zh, { 'usb.text': '已插入 {d} {label}：可用 {free}，共 {total}。如要为它上面的文件保留历史版本，请在“设置 → 文件夹”中添加它的文件夹。', 'usb.look': '查看空间' });
+
+// 2.6.0 #11
+Object.assign(I18N.en, { 'sc.btn': 'Time slider', 'sc.noText': 'No text preview for this version.' });
+Object.assign(I18N.zh, { 'sc.btn': '时间轴', 'sc.noText': '这个版本没有文字预览。' });
+
+// 2.6.0 #38
+Object.assign(I18N.en, { 'lt.btn': 'Evolution', 'lt.lead': '{n} versions of this file (dots, oldest on the left) and {m} other files that started as a copy of one of them (branches).' });
+Object.assign(I18N.zh, { 'lt.btn': '演变图', 'lt.lead': '这个文件的 {n} 个版本（圆点，最早的在左），以及 {m} 个由其中某个版本复制而来的其他文件（分支）。' });
+
+// 2.6.0 #32
+Object.assign(I18N.en, { 'sim.btn': 'Similar photos', 'sim.title': 'Similar photos', 'sim.reading': 'Looking at {n} of {total} pictures…',
+  'sim.lead': '{n} groups of pictures that look alike (burst shots, edits, resized copies). The biggest one of each group is marked; the others can go to the Recycle Bin.',
+  'sim.best': 'Biggest', 'sim.none': 'No similar pictures among {n} pictures in your folders.' });
+Object.assign(I18N.zh, { 'sim.btn': '相似照片', 'sim.title': '相似照片', 'sim.reading': '正在查看第 {n} / {total} 张图片…',
+  'sim.lead': '{n} 组看起来相似的图片（连拍、修图、缩放后的副本）。每组中分辨率最高的一张已标出；其余的可以移到回收站。',
+  'sim.best': '最清晰', 'sim.none': '你文件夹中的 {n} 张图片里没有相似的。' });
+
+// Gemini 2.6.0 review
+Object.assign(I18N.en, {
+  'dw.title': 'More checks and findings', 'dw.count': '{n} found', 'dw.more': '· up to {size} could be freed',
+  'lo.title': 'Program folders unused for a long time (possibly left by uninstalled programs)', 'lo.open': 'Open to check',
+  'lo.hint': 'their name matches no installed program and nothing in them changed for 90 days — open and check before deleting',
+  'lo.askText': 'DeskTrace cannot be 100 % sure that the program of {path} ({size}) was uninstalled. If it is still in use, it may need to be set up again or download its data again. The folder goes to the Recycle Bin — if a program misbehaves afterwards, put it back from there.',
+  'mvf.busy': 'Not moved: {apps} has files in this folder open. Quit it and try again.',
+  'mvf.leftover': 'Folder moved, but its old copy could not be fully deleted (a program still had a file open): {path}. Delete it once that program is closed.',
+  'mvf.step.check': 'Checking whether a program uses the folder…' });
+Object.assign(I18N.zh, {
+  'dw.title': '专项体检与扩展发现', 'dw.count': '发现 {n} 项', 'dw.more': '· 最多可腾出 {size}',
+  'lo.title': '长期未使用的软件文件夹（可能是已卸载软件的残留）', 'lo.open': '打开查看',
+  'lo.hint': '名字与任何已安装的软件都对不上，且 90 天内没有改动——请先打开确认再删除',
+  'lo.askText': '桌迹无法 100% 确认 {path}（{size}）所属的软件已被卸载。如果它仍在使用，删除后该软件可能需要重新设置或重新下载数据。文件夹会放入回收站——若之后发现软件异常，可随时从回收站放回原处。',
+  'mvf.busy': '没有搬家：{apps} 正在使用这个文件夹中的文件。请先退出它再试。',
+  'mvf.leftover': '文件夹已搬走，但原来的副本没能完全删除（有程序仍打开着其中的文件）：{path}。请在关闭那个程序后删除它。',
+  'mvf.step.check': '正在检查是否有程序在使用这个文件夹…' });
+
 let LANG = 'en';
 
 function t(key, vars = {}) {

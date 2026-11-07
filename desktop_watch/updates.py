@@ -55,6 +55,33 @@ class LicenseError(Exception):
         self.code = code
 
 
+def net_changes(changelog, current, removed=None):
+    """The changes a jump from ``current`` really brings (2.6.0): changes to a feature that is removed again
+    before the newest version are left out, and a "… was removed" line only stays if the user had one of the
+    features it removes. ``removed`` maps feature -> version it was removed in (from the license); entries
+    carry "feature" or "removes" ({feature: version it came in}) tags. Untagged entries are kept as they are."""
+    cur = vtuple(current)
+    newest = max((vtuple(r['version']) for r in changelog), default=cur)
+    removed = {f: vtuple(v) for f, v in (removed or {}).items() if vtuple(v) <= newest}
+    out = []
+    for rel in changelog:
+        v = vtuple(rel['version'])
+        if v <= cur:
+            continue
+        keep = []
+        for c in rel.get('changes', []):
+            f = c.get('feature')
+            if f and f in removed and removed[f] > v:
+                continue  # added or changed in this jump, removed again later in it
+            if c.get('removal_only') and not any(vtuple(since) <= cur for since in (c.get('removes') or {}).values()):
+                continue  # removes only things this user never had
+            keep.append(c)
+        if rel.get('changes') and not keep:
+            continue  # everything this release did was undone later in the jump
+        out.append({**rel, 'changes': keep})
+    return out
+
+
 def vtuple(v):
     return tuple(int(x) for x in re.findall(r'\d+', str(v))[:4]) or (0,)
 
@@ -181,9 +208,7 @@ class Updates:
         """What installing ``meta`` brings, version by version (newest first), from after the current one.
         Licenses carry the whole changelog up to their own version, each change with its level (1-5)."""
         out = []
-        for rel in meta.get('changelog') or []:
-            if vtuple(rel['version']) <= vtuple(self.current):
-                continue
+        for rel in net_changes(meta.get('changelog') or [], self.current, meta.get('removed_features')):  # 2.6.0: net of removals
             items = [{'level': c['level'], 'text': c.get(lang) or c.get('en', '')} for c in rel.get('changes', [])]
             notes = rel.get('notes') or {}
             out.append({'version': rel['version'], 'released': rel.get('date'), 'items': items,
@@ -319,7 +344,7 @@ def run_updater(args):
         meta = read_license(args.apply, args.current)
         result['to'] = meta['version']
         # what this update brought, so the window can show "What's new" afterwards (2.0.1)
-        result['changelog'] = [r for r in meta.get('changelog') or [] if vtuple(r['version']) > vtuple(args.current)]
+        result['changelog'] = net_changes(meta.get('changelog') or [], args.current, meta.get('removed_features'))  # 2.6.0
         for d in (new, old):
             if d.exists():
                 shutil.rmtree(d)

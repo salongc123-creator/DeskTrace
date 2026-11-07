@@ -53,7 +53,7 @@ from extractors import EXTRACTABLE, VERSION as EXTRACT_VERSION, category_of, ext
 APP_DIR = Path(__file__).resolve().parent
 APP_ID = 'desktop-watch/1'   # internal id (kept from the old name: older copies answer to it)
 APP_NAME = 'DeskTrace'
-APP_VERSION = '2.5.0'      # the installer and update licenses take their version number from here
+APP_VERSION = '2.6.0'      # the installer and update licenses take their version number from here
 SCHEMA_VERSION = 2       # bump with a step in migrate() whenever stored data changes shape
 TOKEN = secrets.token_hex(16)
 
@@ -140,10 +140,12 @@ CREATE INDEX IF NOT EXISTS ev_path ON events(path);
 CREATE INDEX IF NOT EXISTS ev_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS ev_old ON events(old_path);
 CREATE TABLE IF NOT EXISTS stars(path TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS pins(path TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS notes(event_id INTEGER PRIMARY KEY, text TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS contents(hash TEXT PRIMARY KEY, ext TEXT, data BLOB);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS drive_scans(drive TEXT PRIMARY KEY, serial INTEGER, mode TEXT, finished REAL, data BLOB);
+CREATE TABLE IF NOT EXISTS scan_history(drive TEXT, serial INTEGER, finished REAL, sizes BLOB, PRIMARY KEY(drive, finished));
 """
 
 
@@ -453,6 +455,8 @@ SETTLE = 1.0          # seconds between the two scans that confirm a change has 
 BURST = 0.4           # after a change notification, wait this long so a burst of operations lands in one scan
 MAX_UNSTABLE = 30.0   # a file that never stops changing (e.g. a growing log) is recorded after this long anyway
 SAFETY_MIN = 300.0    # while Windows reports changes instantly, the safety rescan runs at most this often (2.1.0)
+MASS_N = 100         # this many changes, deletions or renames ...
+MASS_WINDOW = 10.0   # ... within this many seconds: a mass change (2.6.0 #6)
 WAKE_DELAY = 45.0     # after the PC wakes up, the catch-up rescan waits this long: the user comes first (2.4.2)
 
 
@@ -563,7 +567,7 @@ class Monitor:
     def roots_loop(self):
         """Every 10 s, see whether each monitored folder can be reached; wake the monitor only when that
         changes (a few directory opens: no measurable cost at idle) (2.4.2)."""
-        last = None
+        last, drives = None, None
         while True:
             time.sleep(10)
             if getattr(App, 'mon', self) is not self:
@@ -575,6 +579,14 @@ class Monitor:
             if last is not None and now != last:
                 self.wake.set()
             last = now
+            try:  # a removable drive plugged in: say so once, with its space (2.6.0 #21)
+                rem = {d['drive']: d for d in cleaner.drives() if d['removable']}
+                if drives is not None:
+                    for d in set(rem) - drives:
+                        App.hub.publish({'type': 'drive', 'drive': rem[d]})
+                drives = set(rem)
+            except Exception:
+                pass
 
     def offline_roots(self):
         out = [r for r in self.settings['roots'] if not self.root_available(r)]
@@ -756,7 +768,7 @@ class Monitor:
         (they already report every change at once) no more often than every SAFETY_MIN seconds (2.1.0)."""
         iv = float(self.settings['interval'])
         if self.instant:
-            return max(iv, SAFETY_MIN * (3 if on_battery() else 1))  # battery saver: every 15 minutes
+            return max(iv, SAFETY_MIN * (6 if battery_low() else 3 if on_battery() else 1))  # battery: every 15 min, under 20 %: 30 min (2.6.0 #41)
         return iv
 
     def after_wake(self, now):
@@ -878,11 +890,17 @@ class Monitor:
             for p, st in created:
                 by_key.setdefault(st, []).append(p)
             renames = []
+            del_keys = {}
+            for p in deleted:
+                k = (self.confirmed[p][0], self.confirmed[p][1])
+                del_keys[k] = del_keys.get(k, 0) + 1
             for p in list(deleted):
                 c = self.confirmed[p]
                 cands = by_key.get((c[0], c[1]))
                 if cands:
                     same_name = [n for n in cands if os.path.basename(n).lower() == os.path.basename(p).lower()]
+                    if not same_name and (len(cands) > 1 or del_keys[(c[0], c[1])] > 1):
+                        continue  # several files share size and time (Windows' clock is coarse): content decides below (2.6.0)
                     same_ext = [n for n in cands if os.path.splitext(n)[1].lower() == os.path.splitext(p)[1].lower()]
                     pick = (same_name or same_ext or cands)[0]
                     cands.remove(pick)
@@ -950,6 +968,18 @@ class Monitor:
                     self.emit(kind, p, size=st[0], old_size=prev[0] if prev else None, mtime=st[1], h=h,
                               prev=prev[2] if prev else None, flags=','.join(f))
 
+        # mass change guard (2.6.0 #6): a batch job gone wrong or ransomware touches many files at once
+        hits = len(modified) + len(deleted) + len(renames)
+        if hits and not first and now > getattr(self, 'mass_quiet', 0):
+            win = [x for x in getattr(self, '_burst', []) if now - x[0] <= MASS_WINDOW] + [(now, hits)]
+            self._burst = win
+            total = sum(n for _, n in win)
+            if total >= MASS_N:
+                m = getattr(self, 'mass', None)
+                if m and now - m['until'] < 120:
+                    m.update(until=now, n=m['n'] + hits)
+                else:
+                    self.mass = {'since': win[0][0] - SETTLE - 2, 'until': now, 'n': total}
         if new_roots:
             self.known_roots |= set(new_roots)
             self.store.set_meta('known_roots', sorted(self.known_roots))
@@ -1114,6 +1144,7 @@ class Monitor:
                 check_integrity()
                 self.cleanup()
                 recompress_old(self.store)
+                verify_blobs(self.store)
                 self.store.tidy()
             except Exception as e:
                 print('cleanup error:', repr(e), file=sys.stderr)
@@ -1126,13 +1157,16 @@ class Monitor:
         days = float(self.settings.get('keep_days') or 0)
         cap = float(self.settings.get('max_storage_gb') or 0) * 1024 ** 3
         # Versions the user labelled with a note are kept no matter how old.
-        removed = st.count('DELETE FROM events WHERE ts < ? AND id NOT IN (SELECT event_id FROM notes)',
+        removed = st.count('DELETE FROM events WHERE ts < ? AND id NOT IN (SELECT event_id FROM notes)'
+                           ' AND path NOT IN (SELECT path FROM pins)',  # pinned: kept forever (2.6.0 #20)
                            (time.time() - days * 86400,)) if days > 0 else 0
         freed = 0
         with self.lock:  # no new snapshots while deciding what is unused
             keep = {c[2] for c in self.confirmed.values() if c[2]}
             keep |= {r['h'] for r in st.q('SELECT hash h FROM events WHERE id IN (SELECT event_id FROM notes)'
-                                          ' UNION SELECT prev_hash FROM events WHERE id IN (SELECT event_id FROM notes)') if r['h']}
+                                          ' UNION SELECT prev_hash FROM events WHERE id IN (SELECT event_id FROM notes)'
+                                          ' UNION SELECT hash FROM events WHERE path IN (SELECT path FROM pins)'
+                                          ' UNION SELECT prev_hash FROM events WHERE path IN (SELECT path FROM pins)') if r['h']}
             newest = {r['h']: r['t'] for r in st.q(
                 'SELECT h, MAX(t) t FROM (SELECT hash h, ts t FROM events UNION ALL SELECT prev_hash, ts FROM events)'
                 ' WHERE h IS NOT NULL GROUP BY h')}
@@ -1190,6 +1224,8 @@ class Monitor:
             w.append('integrity')
         if self.stats.get('offline_roots'):
             w.append('rootgone')
+        if getattr(self, 'mass', None) and time.time() - self.mass['until'] < 6 * 3600:
+            w.append('mass')
         return w
 
     def forget_root_files(self, root):
@@ -1209,7 +1245,7 @@ class Monitor:
         return n
 
     def status(self):
-        return {**self.stats, 'offline_roots': self.stats.get('offline_roots') or [], 'warn': self.warnings(), 'paused': self.paused, 'pause_until': self.pause_until if self.paused else 0,
+        return {**self.stats, 'offline_roots': self.stats.get('offline_roots') or [], 'mass': getattr(self, 'mass', None), 'warn': self.warnings(), 'paused': self.paused, 'pause_until': self.pause_until if self.paused else 0,
                 'mute_until': float(self.settings.get('mute_until') or 0), 'roots': self.settings['roots'], 'instant': self.instant,
                 'interval': self.settings['interval'], 'uptime': time.time() - self.started}
 
@@ -1229,6 +1265,7 @@ class Monitor:
         d['exists'] = os.path.exists(d['path'])
         d['flags'] = [f for f in (d['flags'] or '').split(',') if f]
         d['starred'] = d['path'] in self.stars
+        d['pinned'] = is_pinned(d['path'])
         d['note'] = self.notes.get(d['id'])
         return d
 
@@ -1242,6 +1279,46 @@ def diff_counts(a, b):
         if tag in ('replace', 'insert'):
             added += j2 - j1
     return added, removed
+
+
+def diff_report_html(ev, d, lang='en'):
+    """One change as a self-contained HTML page: removed lines red, added green, changed words marked
+    (2.6.0 #26). Opens in any browser; nothing is loaded from the internet."""
+    import html as H
+    zh = lang == 'zh'
+    T = (lambda en, cn: cn if zh else en)
+
+    def seg(row):
+        if not row.get('s'):
+            return H.escape(row['t'])
+        return ''.join(f'<mark>{H.escape(x)}</mark>' if ch else H.escape(x) for ch, x in row['s'])
+    body = []
+    for h in d.get('hunks', []):
+        body.append(f'<tr class="hunk"><td colspan="3">@@ {h["a"]} → {h["b"]}</td></tr>')
+        for r in h['rows']:
+            cls = {'-': 'del', '+': 'add'}.get(r['k'], 'ctx')
+            body.append(f'<tr class="{cls}"><td class="n">{r.get("a", "")}</td><td class="n">{r.get("b", "")}</td>'
+                        f'<td class="t"><span class="k">{r["k"]}</span>{seg(r)}</td></tr>')
+    when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ev['ts']))
+    return f"""<!doctype html><html lang="{'zh-CN' if zh else 'en'}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{H.escape(ev['name'])} — {T('changes', '修改对比')}</title>
+<style>
+:root {{ --bg:#fff; --fg:#1b1f2a; --mute:#6b7280; --add:#e6f6ec; --addk:#137a3d; --del:#fdecec; --delk:#b42318; --hunk:#f1f3f8; --mark:#ffe08a; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg:#14161c; --fg:#e7e9ee; --mute:#9aa1ae; --add:#163524; --addk:#5fd38d; --del:#3a1a1a; --delk:#ff8a80; --hunk:#1f2330; --mark:#6b5a12; }} }}
+body {{ margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, "Microsoft YaHei", sans-serif; }}
+header {{ padding:20px 24px 12px; }} h1 {{ font-size:20px; margin:0 0 4px; }} .meta {{ color:var(--mute); font-size:13px; }}
+.sum b.p {{ color:var(--addk); }} .sum b.m {{ color:var(--delk); }}
+table {{ border-collapse:collapse; width:100%; font:13px/1.45 Consolas, "Cascadia Mono", monospace; }}
+td {{ padding:1px 8px; vertical-align:top; }} td.n {{ color:var(--mute); text-align:right; width:1%; white-space:nowrap; user-select:none; }}
+td.t {{ white-space:pre-wrap; word-break:break-word; }} .k {{ display:inline-block; width:1.2em; color:var(--mute); }}
+tr.add {{ background:var(--add); }} tr.add .k {{ color:var(--addk); }} tr.del {{ background:var(--del); }} tr.del .k {{ color:var(--delk); }}
+tr.hunk td {{ background:var(--hunk); color:var(--mute); padding:4px 8px; }} mark {{ background:var(--mark); color:inherit; border-radius:2px; }}
+footer {{ color:var(--mute); font-size:12px; padding:16px 24px; }}
+</style></head><body><header><h1>{H.escape(ev['name'])}</h1>
+<div class="meta">{H.escape(ev['path'])}<br>{T('Changed', '修改于')} {when}</div>
+<div class="sum">{T('Added', '新增')} <b class="p">+{d.get('added', 0)}</b> · {T('removed', '删除')} <b class="m">−{d.get('removed', 0)}</b>
+{T(' (shortened)', '（已截断）') if d.get('truncated') else ''}</div></header>
+<table>{''.join(body)}</table><footer>{T('Made with DeskTrace', '由桌迹生成')} {APP_VERSION}</footer></body></html>"""
 
 
 def build_diff(a, b, context=3, max_lines=6000):
@@ -1293,6 +1370,46 @@ def save_scan(sc):
     App.store.x('INSERT OR REPLACE INTO drive_scans(drive, serial, mode, finished, data) VALUES(?,?,?,?,?)',
                 (sc.root, sc.serial, sc.mode, sc.finished, data))
     App.store.x('DELETE FROM drive_scans WHERE drive NOT IN (SELECT drive FROM drive_scans ORDER BY finished DESC LIMIT 8)')
+    if sc.mode == 'full' and sc.finished:  # the radar compares full scans over time (2.6.0 #1)
+        sizes = {d: v[0] for d, v in sc.dirs.items() if v[0] >= GROWTH_KEEP}
+        App.store.x('INSERT OR REPLACE INTO scan_history(drive, serial, finished, sizes) VALUES(?,?,?,?)',
+                    (sc.root, sc.serial, sc.finished, zlib.compress(json.dumps(sizes).encode('utf-8'), 6)))
+        App.store.x('DELETE FROM scan_history WHERE drive=? AND finished NOT IN '
+                    '(SELECT finished FROM scan_history WHERE drive=? ORDER BY finished DESC LIMIT 30)', (sc.root, sc.root))
+
+
+GROWTH_KEEP = 50 * 2 ** 20   # folders of 50 MB or more are remembered per full scan for the radar
+GROWTH_MIN = 100 * 2 ** 20   # growth shown from 100 MB
+
+
+def space_growth(d, days):
+    """Space Spikes Radar (2.6.0 #1): the folders of drive ``d`` that grew most between the newest full scan
+    and one about ``days`` days older (the oldest kept one if none is that old). Only the deepest folder that
+    explains a growth is shown: if most of C:\\Users grew in one folder below it, that folder is the cause."""
+    rows = App.store.q('SELECT finished, serial, sizes FROM scan_history WHERE drive=? ORDER BY finished DESC', (d,))
+    rows = [r for r in rows if r['serial'] == cleaner.volume_serial(d)]
+    if len(rows) < 2:
+        return {'ok': True, 'ready': False, 'scans': len(rows)}
+    new = rows[0]
+    want = new['finished'] - days * 86400
+    old = next((r for r in rows[1:] if r['finished'] <= want + 3 * 3600), rows[-1])
+    a = json.loads(zlib.decompress(old['sizes']))
+    b = json.loads(zlib.decompress(new['sizes']))
+    delta = {f: b[f] - a.get(f, 0) for f in b if b[f] - a.get(f, 0) >= GROWTH_MIN}
+    gone = sum(max(0, a[f] - b.get(f, 0)) for f in a if f not in b)
+    picked = []
+    for f in sorted(delta, key=lambda x: -delta[x]):
+        pre = f.rstrip('\\') + '\\'
+        # a deeper folder explains most of this growth: show that one instead
+        if any(g.startswith(pre) and delta[g] >= delta[f] * 0.6 for g in delta if g != f):
+            continue
+        picked.append({'path': f, 'name': os.path.basename(f.rstrip('\\')) or f, 'grew': delta[f], 'was': a.get(f, 0), 'now': b[f],
+                       'new': f not in a})
+        if len(picked) >= 10:
+            break
+    total = b.get(d, 0) - a.get(d, 0)
+    return {'ok': True, 'ready': True, 'from': old['finished'], 'to': new['finished'], 'total': total, 'items': picked,
+            'shrunk': gone, 'scans': len(rows)}
 
 
 def load_scan(d):
@@ -1340,6 +1457,54 @@ def start_scan(d, mode=None, priority=True):
 
 
 _prescan = {'checked': 0.0, 'running': False}
+
+
+_pins = {'at': 0, 'set': set()}
+
+
+def is_pinned(path):
+    """The user chose "Keep forever" for this file (2.6.0 #20)."""
+    if time.time() - _pins['at'] > 5:
+        _pins.update(at=time.time(), set={os.path.normcase(r['path']) for r in App.store.q('SELECT path FROM pins')})
+    return os.path.normcase(os.path.normpath(path)) in _pins['set']
+
+
+MILESTONES = {'restored': (10, 100, 1000), 'freed': (10 * 2 ** 30, 100 * 2 ** 30, 2 ** 40)}
+
+
+def milestone(kind, n):
+    """Count ``n`` more restored files or freed bytes; the first time a step is passed, the window shows one
+    quiet card (2.6.0 #50). Switched off in Settings with "milestones": false."""
+    if not n or not App.mon.settings.get('milestones', True):
+        return
+    total = App.store.meta('count_' + kind, 0) + n
+    App.store.set_meta('count_' + kind, total)
+    shown = App.store.meta('milestones_shown', [])
+    for step in MILESTONES[kind]:
+        key = f'{kind}:{step}'
+        if total >= step and key not in shown:
+            App.store.set_meta('milestones_shown', shown + [key])
+            App.hub.publish({'type': 'milestone', 'kind': kind, 'step': step, 'total': total})
+            break
+
+
+def lineage(path):
+    """A file's kept versions in order, and the other files whose first version was one of them — copies,
+    "Save as", attachments saved again (2.6.0 #38)."""
+    rows = App.store.q("SELECT id, ts, kind, hash, prev_hash FROM events WHERE path=? AND hash IS NOT NULL AND kind != 'deleted' ORDER BY id", (path,))
+    versions = [{'id': r['id'], 'ts': r['ts'], 'hash': r['hash']} for r in rows]
+    if rows and rows[0]['prev_hash'] and rows[0]['kind'] != 'created':  # the version from before monitoring started
+        versions.insert(0, {'id': None, 'ts': rows[0]['ts'], 'hash': rows[0]['prev_hash'], 'before': True})
+    hashes = {v['hash'] for v in versions}
+    branches = []
+    if hashes:
+        marks = ','.join('?' * len(hashes))
+        for r in App.store.q(f"SELECT path, MIN(ts) ts, hash FROM events WHERE hash IN ({marks}) AND path != ? AND kind IN ('created', 'modified')"
+                             ' GROUP BY path ORDER BY ts LIMIT 30', (*hashes, path)):
+            first = App.store.q("SELECT hash FROM events WHERE path=? AND hash IS NOT NULL ORDER BY id LIMIT 1", (r['path'],))
+            if first and first[0]['hash'] in hashes:  # it started as one of these versions
+                branches.append({'path': r['path'], 'name': os.path.basename(r['path']), 'ts': r['ts'], 'from': first[0]['hash']})
+    return {'versions': versions, 'branches': branches}
 
 
 def note_last_clean(paths, size):
@@ -1479,6 +1644,31 @@ def recompress_old(store, limit=3000):
     return done
 
 
+def verify_blobs(store, limit=2000):
+    """Read kept versions back, a batch per upkeep run at background priority, and check that each one's
+    content still matches its name (SHA-1 or SHA-256) (2.6.0 #43). A damaged one is reported in Diagnostics
+    and in the warning bar; it is never "repaired" by guessing. The next batch starts where this one ended."""
+    names = sorted(h for h, _, _, _ in iter_blobs())
+    if not names:
+        return
+    start = store.meta('verify_at', '')
+    todo = [h for h in names if h > start][:limit] or names[:limit]
+    bad = set(store.meta('blobs_bad', []))
+    for h in todo:
+        wait_for_power(store)
+        try:
+            data = store.read_blob(h)
+            ok = (hashlib.sha1 if len(h) == 40 else hashlib.sha256)(data).hexdigest() == h
+        except (OSError, SnapshotError):
+            ok = False
+        (bad.discard if ok else bad.add)(h)
+    store.set_meta('verify_at', todo[-1] if todo[-1] != names[-1] else '')
+    store.set_meta('blobs_bad', sorted(bad))
+    store.set_meta('verify_last', time.time())
+    if bad:
+        App.integrity = f'{len(bad)} kept versions are damaged (their content no longer matches)'
+
+
 def check_integrity():
     """SQLite's quick check of the history database (2.3.0, review P0-4): a damaged database is shown,
     not silently used."""
@@ -1532,6 +1722,97 @@ def backup_history(dest, raw=False):
         b.update(state='done', path=str(root), finished=time.time())
     except Exception as e:
         b.update(state='failed', error=repr(e)[:300], finished=time.time())
+
+
+def ctypes_fs_name(drive):
+    """The file system of ``drive`` ("NTFS", "exFAT", ...)."""
+    import ctypes
+    name = ctypes.create_unicode_buffer(32)
+    ok = ctypes.windll.kernel32.GetVolumeInformationW(drive, None, 0, None, None, None, name, 32) if os.name == 'nt' else 0
+    return name.value if ok else ''
+
+
+def pick_backup_file():
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        p = filedialog.askopenfilename(title=APP_NAME, filetypes=[(APP_NAME + ' history', '*.dtbackup')])
+        root.destroy()
+        return os.path.normpath(p) if p else ''
+    except Exception:
+        return ''
+
+
+def pending_dir():
+    return DATA.parent / (DATA.name + ' import pending')
+
+
+def export_history(dest):
+    """The whole history — database, every kept version, settings — as one file in ``dest``, to take to
+    another PC (2.6.0 #44). Versions are already compressed, so the file is stored, not zipped again."""
+    b = App.backup
+    try:
+        background_thread()
+        out = Path(dest) / f'DeskTrace history {time.strftime("%Y-%m-%d %H-%M")}.dtbackup'
+        tmp = DATA / 'export-tmp.db'
+        target = sqlite3.connect(str(tmp))
+        with App.store.lock:
+            App.store.conn.backup(target)
+        target.close()
+        blobs = list(iter_blobs())
+        b.update(total=len(blobs), done=0, bytes=0)
+        with zipfile.ZipFile(out, 'w', zipfile.ZIP_STORED, allowZip64=True) as z:
+            z.write(tmp, 'watch.db')
+            z.write(SETTINGS_FILE, 'settings.json')
+            z.writestr('FORMAT.txt', 'DeskTrace history export. Snapshots: ' + SNAP_FORMAT + '.\nMade by DeskTrace '
+                       + APP_VERSION + ', ' + time.strftime('%Y-%m-%d %H:%M') + '.\n')
+            for h, size, _, src in blobs:
+                z.write(src, f'blobs/{h[:2]}/{h}')
+                b['done'] += 1
+                b['bytes'] += size
+        tmp.unlink()
+        b.update(state='done', path=str(out), finished=time.time())
+    except Exception as e:
+        b.update(state='failed', error=repr(e)[:300], finished=time.time())
+
+
+def stage_import(path):
+    """Check a .dtbackup file and unpack it next to the data folder; the next start uses it (2.6.0 #44)."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = set(z.namelist())
+            if 'watch.db' not in names or 'settings.json' not in names:
+                return {'ok': False, 'code': 'notBackup'}
+            if any(n.startswith(('/', '\\')) or '..' in n.split('/') for n in names):
+                return {'ok': False, 'code': 'notBackup'}  # never write outside the folder
+            pend = pending_dir()
+            shutil.rmtree(pend, ignore_errors=True)
+            z.extractall(pend)
+        con = sqlite3.connect(str(pend / 'watch.db'))
+        ok = con.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
+        con.close()
+        if not ok:
+            shutil.rmtree(pend, ignore_errors=True)
+            return {'ok': False, 'code': 'damaged'}
+        return {'ok': True}
+    except (OSError, zipfile.BadZipFile, sqlite3.Error):
+        return {'ok': False, 'code': 'notBackup'}
+
+
+def apply_pending_import():
+    """At start, before the history is opened: an imported history takes the data folder's place; what was
+    there is kept as "<data> before import <time>" (2.6.0 #44)."""
+    pend = pending_dir()
+    if not (pend / 'watch.db').exists():
+        return
+    keep = DATA.parent / f'{DATA.name} before import {time.strftime("%Y-%m-%d %H-%M-%S")}'
+    if DATA.exists():
+        DATA.rename(keep)
+    pend.rename(DATA)
+    print(f'imported history applied; the previous one is kept in {keep}')
 
 
 def iter_blobs():
@@ -1588,6 +1869,7 @@ class App:
     integrity = None     # 'ok', or what SQLite's quick check reported (2.3.0)
     prescanned = {}      # drive -> when the background pre-scan last read it (2.4.0)
     backup = {}          # the running or last history backup (2.3.0)
+    move = {}            # the running or last folder move to another drive (2.6.0 #3)
     current_cache = None
     storage = {'bytes': 0, 'at': 0}
     tray = None
@@ -1966,6 +2248,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.search(qs))
             if route == '/api/media':
                 return self.media(qs)
+            if route == '/api/lineage':  # versions and the copies made from them (2.6.0 #38)
+                return self.send_json(lineage(qs.get('path', '')))
             if route == '/api/history':
                 return self.send_json([App.mon.event_dict(row=r) for r in file_history(qs['path'])])
             if route == '/api/file-info':
@@ -1980,6 +2264,40 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(view_cached('space:' + f, lambda: self.space(f)))
             if route == '/api/storage':  # which files' kept versions use DeskTrace's space (2.1.0)
                 return self.send_json(view_cached('storage', history_storage))
+            if route == '/api/clean/leftovers':  # possible leftovers of uninstalled programs (2.6.0 #2)
+                d = cleaner.system_drive()
+                sc = _scans.get(d) or load_scan(d)
+                sizes = {k: v[0] for k, v in sc.dirs.items()} if sc and sc.state != 'scanning' else {}
+                App.leftovers = cleaner.leftovers(sizes) if sizes else []
+                return self.send_json({'ok': True, 'ready': bool(sizes), 'items': App.leftovers})
+            if route == '/api/clean/git':  # large Git repositories (2.6.0 #29)
+                App.git_repos = cleaner.git_repos()
+                return self.send_json({'items': App.git_repos, 'git': bool(shutil.which('git'))})
+            if route == '/api/relocate':  # progress of a folder move, and the folders moved so far (2.6.0 #3)
+                return self.send_json({**App.move, 'moves': App.store.meta('moves', [])})
+            if route == '/api/drafts':  # recent unsaved drafts of Office / WPS (2.6.0 #24)
+                App.drafts = cleaner.recent_drafts()
+                return self.send_json({'items': App.drafts})
+            if route == '/api/chat-media':  # what a chat app keeps, by kind, older than N days (2.6.0 #7)
+                a = next((x for x in cleaner.chat_apps() if x['app'] == qs.get('app')), None)
+                if not a:
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                m = cleaner.chat_media(a['data'], max(7, int(qs.get('days', 90))))
+                return self.send_json({'ok': True, 'kinds': {k: {'n': len(v), 'size': sum(x[1] for x in v)} for k, v in m.items()}})
+            if route == '/api/clean/locales':  # programs' language packs, listed only (2.6.0 #27)
+                return self.send_json({'items': cleaner.language_packs()})
+            if route == '/api/clean/badnames':  # names Windows cannot handle (2.6.0 #35)
+                App.badnames = cleaner.bad_names()
+                return self.send_json({'items': App.badnames})
+            if route == '/api/clean/cloud':  # synced folders: on this PC vs online-only (2.6.0 #30)
+                return self.send_json({'items': cleaner.cloud_overview()})
+            if route == '/api/clean/health':  # disk health as Windows reports it (2.6.0 #34)
+                return self.send_json({'disks': cleaner.disk_health()})
+            if route == '/api/clean/growth':  # Space Spikes Radar (2.6.0 #1)
+                d = clean_drive(qs.get('drive'))
+                if not d:
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                return self.send_json(space_growth(d, max(1, min(30, int(qs.get('days', 1))))))
             if route == '/api/clean/last':  # what the last cleanup moved to the Recycle Bin (2.4.2)
                 last = App.store.meta('last_clean') or {}
                 return self.send_json({'n': len(last.get('paths') or []), 'size': last.get('size', 0), 'at': last.get('at', 0)})
@@ -2119,6 +2437,20 @@ class Handler(BaseHTTPRequestHandler):
                     os.chmod(dest, 0o444)  # read-only: it is a look at the past, edits belong in the real file
                     os.startfile(dest) if os.name == 'nt' else subprocess.Popen(['xdg-open', dest])
                 return self.send_json({'ok': True, 'path': dest})
+            if route == '/api/export':  # the whole history as one file, for another PC (2.6.0 #44)
+                dest = str(b.get('dest') or '') or pick_folder()
+                if not dest or not os.path.isdir(dest) or under(os.path.normpath(dest), str(DATA)):
+                    return self.send_json({'ok': False, 'code': 'notAllowed' if dest else 'cancelled'})
+                if App.backup.get('state') == 'running':
+                    return self.send_json({'ok': False, 'code': 'busy'})
+                App.backup = {'state': 'running', 'started': time.time(), 'done': 0, 'total': 0, 'bytes': 0, 'dest': dest}
+                threading.Thread(target=export_history, args=(dest,), daemon=True, name='export').start()
+                return self.send_json({'ok': True})
+            if route == '/api/import':  # a history from another PC: used from the next start (2.6.0 #44)
+                src = str(b.get('path') or '') or pick_backup_file()
+                if not src:
+                    return self.send_json({'ok': False, 'code': 'cancelled'})
+                return self.send_json(stage_import(src))
             if route == '/api/backup':  # back up the whole history into a folder the user picked (2.3.0)
                 dest = str(b.get('dest') or '')
                 if not os.path.isdir(dest) or under(dest, str(DATA)):
@@ -2167,10 +2499,16 @@ class Handler(BaseHTTPRequestHandler):
                 os.startfile(a['exe'])
                 return self.send_json({'ok': True})
             if route == '/api/clean/hibernate':  # Windows asks the user (UAC); DeskTrace never elevates itself
-                arg = '/h on' if b.get('on') else '/h off'
+                arg = '/h /type reduced' if b.get('reduced') else ('/h on' if b.get('on') else '/h off')  # 2.6.0 #17: reduced keeps fast startup
                 subprocess.Popen(['powershell', '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
                                   f"Start-Process powercfg -ArgumentList '{arg}' -Verb RunAs"], creationflags=NO_WINDOW)
                 return self.send_json({'ok': True, 'asked': True})
+            if route == '/api/clean/wintool':  # Windows' own tools (2.6.0 #25, #49): DeskTrace only opens them
+                tool = {'optimize': ['dfrgui'], 'index': ['control', 'srchadmin.dll'], 'cleanmgr': ['cleanmgr']}.get(str(b.get('tool')))
+                if not tool:
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                subprocess.Popen(tool)
+                return self.send_json({'ok': True})
             if route == '/api/clean/power':  # Power Options, to change it by hand
                 subprocess.Popen(['control', 'powercfg.cpl'])
                 return self.send_json({'ok': True})
@@ -2181,6 +2519,7 @@ class Handler(BaseHTTPRequestHandler):
                 r = cleaner.clean(d, str(b.get('id', '')), recycle)
                 find_cleanable(d)
                 note_last_clean(r.get('recycled') or [], r.get('freed') or 0)
+                milestone('freed', r.get('freed') or 0)
                 return self.send_json({'ok': 'code' not in r, **r})
             if route == '/api/clean/last-undo':  # put back the last cleanup, any time later (2.4.2: was a 10 s offer)
                 last = App.store.meta('last_clean') or {}
@@ -2192,6 +2531,157 @@ class Handler(BaseHTTPRequestHandler):
                 for dr in {cleaner.drive_of(x) for x in r['restored']}:
                     find_cleanable(dr)
                 return self.send_json(r)
+            if route == '/api/mass-restore':  # put every file of a mass change back as it was before (2.6.0 #6)
+                m = App.mon.mass or {}
+                since, until = float(b.get('since') or m.get('since') or 0), float(b.get('until') or m.get('until') or 0) + 5
+                rows = App.store.q('SELECT * FROM events WHERE ts >= ? AND ts <= ? ORDER BY id', (since, until))
+                first = {}
+                for r in rows:  # per file, its first change in the burst: what it was before
+                    first.setdefault(r['old_path'] if r['kind'] == 'renamed' else r['path'], r)
+                done = failed = 0
+                renames = [r['id'] for r in first.values() if r['kind'] == 'renamed']
+                for r in first.values():
+                    if r['kind'] == 'created':
+                        continue  # a new file (a ransom note, a copy): left for the user to judge
+                    if r['kind'] == 'renamed':
+                        continue
+                    try:
+                        res = self.restore({'id': r['id'], 'version': 'prev', 'replace': r['kind'] == 'modified' and os.path.isfile(r['path']),
+                                            'lang': b.get('lang')})
+                    except OSError:
+                        res = {'ok': False}
+                    done, failed = (done + 1, failed) if res.get('ok') else (done, failed + 1)
+                if renames:
+                    rb = self.rename_back(renames)
+                    done, failed = done + rb['done'], failed + len(rb['skipped'])
+                App.mon.mass, App.mon._burst = None, []
+                App.mon.mass_quiet = time.time() + 60  # our own restore is not a new mass change
+                App.mon.wake.set()
+                return self.send_json({'ok': True, 'restored': done, 'failed': failed})
+            if route == '/api/mass-dismiss':
+                App.mon.mass, App.mon._burst = None, []
+                App.mon.mass_quiet = time.time() + 600  # "that was me": no new alert for 10 minutes (Gemini 2.6.0 Q-1)
+                return self.send_json({'ok': True})
+            if route == '/api/folder-at':  # a folder as it was at a time, as a copy (2.6.0 #31)
+                return self.send_json(self.folder_at(str(b.get('folder', '')), float(b.get('ts') or 0), b.get('lang')))
+            if route == '/api/diff-report':  # one change as an HTML report the user saves (2.6.0 #26)
+                ev = App.mon.event_dict(int(b['id']))
+                d = self.diff(int(b['id']), 3)
+                if not d.get('hunks'):
+                    return self.send_json({'ok': False, 'code': 'noDiff'})
+                dest = str(b.get('dest') or '') or pick_save(os.path.splitext(ev['name'])[0] + ' — ' + ('修改对比' if b.get('lang') == 'zh' else 'changes') + '.html')
+                if not dest:
+                    return self.send_json({'ok': False, 'code': 'cancelled'})
+                Path(dest).write_text(diff_report_html(ev, d, b.get('lang') or 'en'), 'utf-8')
+                return self.send_json({'ok': True, 'path': dest})
+            if route == '/api/dup-link':  # identical copies share one file on disk (2.6.0 #13)
+                paths = [os.path.normpath(str(x)) for x in (b.get('paths') or [])][:500]
+                if len(paths) < 2 or not all(self.allowed_path(p) and os.path.isfile(p) for p in paths):
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                keep, freed, done, skipped = paths[0], 0, 0, []
+                drive = cleaner.drive_of(keep)
+                fs = ctypes_fs_name(drive)
+                if fs != 'NTFS':
+                    return self.send_json({'ok': False, 'code': 'notNtfs'})
+                with open(keep, 'rb') as fh:
+                    want = hashlib.sha256(fh.read()).hexdigest()
+                for p in paths[1:]:
+                    try:
+                        if cleaner.drive_of(p) != drive:
+                            skipped.append({'path': p, 'code': 'otherDrive'})
+                            continue
+                        with open(p, 'rb') as fh:
+                            if hashlib.sha256(fh.read()).hexdigest() != want:
+                                skipped.append({'path': p, 'code': 'changed'})  # not identical (any more)
+                                continue
+                        if os.path.samefile(p, keep):
+                            continue
+                        size = os.path.getsize(p)
+                        tmp = p + '.dt-link.tmp'
+                        os.link(keep, tmp)
+                        try:
+                            os.replace(tmp, p)
+                        except OSError:
+                            os.remove(tmp)
+                            raise
+                        freed, done = freed + size, done + 1
+                    except OSError:
+                        skipped.append({'path': p, 'code': 'inUse', 'by': cleaner.lockers(p)})
+                return self.send_json({'ok': True, 'linked': done, 'freed': freed, 'skipped': skipped})
+            if route == '/api/relocate':  # move a big folder to another drive, verified, junction left (2.6.0 #3)
+                src = os.path.normpath(str(b.get('path', '')))
+                drive = str(b.get('drive', ''))[:2].upper() + '\\'
+                if App.move.get('state') == 'running':
+                    return self.send_json({'ok': False, 'code': 'busy'})
+                roots = App.mon.settings['roots']
+                if (not os.path.isdir(src) or cleaner.is_core(src) or len(src) <= 3 or getattr(os.path, 'isjunction', lambda _: False)(src)
+                        or under(src, str(DATA)) or under(str(DATA), src) or any(under(r, src) or under(src, r) for r in roots)
+                        or cleaner.drive_of(src) == drive or not os.path.isdir(drive) or ctypes_fs_name(drive) != 'NTFS'):
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                dest = str(b.get('dest') or '') or os.path.join(drive, 'DeskTrace moved', src[3:])
+                need = cleaner._tree_size(src)
+                if shutil.disk_usage(drive).free < need * 1.1 + 2 ** 30:
+                    return self.send_json({'ok': False, 'code': 'noSpace'})
+                App.move = {'state': 'running', 'src': src, 'dest': dest, 'size': need, 'step': 'start', 'done': 0, 'total': 0}
+
+                def go():
+                    r = cleaner.move_folder(src, dest, progress=lambda **k: App.move.update(k))
+                    if r.get('ok'):
+                        moves = App.store.meta('moves', [])
+                        App.store.set_meta('moves', moves + [{'src': src, 'dest': dest, 'size': need, 'at': time.time()}])
+                    App.move.update(state='done' if r.get('ok') else 'failed', result=r)
+                threading.Thread(target=go, daemon=True, name='relocate').start()
+                return self.send_json({'ok': True})
+            if route == '/api/relocate-back':  # bring a moved folder back (2.6.0 #3)
+                src = os.path.normpath(str(b.get('path', '')))
+                m = next((x for x in App.store.meta('moves', []) if x['src'] == src), None)
+                if not m or App.move.get('state') == 'running':
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                App.move = {'state': 'running', 'src': src, 'dest': m['dest'], 'size': m['size'], 'step': 'start', 'done': 0, 'total': 0}
+
+                def back():
+                    r = cleaner.move_back(src, m['dest'], progress=lambda **k: App.move.update(k))
+                    if r.get('ok'):
+                        App.store.set_meta('moves', [x for x in App.store.meta('moves', []) if x['src'] != src])
+                    App.move.update(state='done' if r.get('ok') else 'failed', result=r)
+                threading.Thread(target=back, daemon=True, name='relocate-back').start()
+                return self.send_json({'ok': True})
+            if route == '/api/draft-save':  # a copy of a draft, in Documents\DeskTrace recovered (2.6.0 #24)
+                p = os.path.normpath(str(b.get('path', '')))
+                if not any(x['path'] == p for x in getattr(App, 'drafts', [])):
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                folder = Path(os.environ.get('USERPROFILE', str(DATA))) / 'Documents' / 'DeskTrace recovered'
+                folder.mkdir(parents=True, exist_ok=True)
+                stem, ext = os.path.splitext(os.path.basename(p))
+                dest, n = folder / (stem + ext), 2
+                while dest.exists():
+                    dest, n = folder / f'{stem} ({n}){ext}', n + 1
+                shutil.copy2(p, dest)
+                return self.send_json({'ok': True, 'path': str(dest)})
+            if route == '/api/chat-media-clean':  # chosen kinds of old received media to the Recycle Bin (2.6.0 #7)
+                a = next((x for x in cleaner.chat_apps() if x['app'] == b.get('app')), None)
+                kinds = [k for k in (b.get('kinds') or []) if k in ('picture', 'video', 'file', 'cache')]
+                if not a or not kinds:
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                m = cleaner.chat_media(a['data'], max(7, int(b.get('days', 90))))
+                todo = [x for k in kinds for x in m[k]]
+                moved = set(recycle_many([p for p, _ in todo]))
+                freed = sum(size for p, size in todo if p in moved)
+                note_last_clean(sorted(moved)[:5000], freed)
+                milestone('freed', freed)
+                return self.send_json({'ok': True, 'moved': len(moved), 'freed': freed, 'left': len(todo) - len(moved)})
+            if route == '/api/clean/fix-name':  # rename one of them so Windows can handle it (2.6.0 #35)
+                p = str(b.get('path', ''))
+                if not any(x['path'] == p for x in getattr(App, 'badnames', [])):
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                r = cleaner.fix_name(p)
+                if r.get('ok'):
+                    App.badnames = [x for x in App.badnames if x['path'] != p]
+                return self.send_json(r)
+            if route == '/api/clean/cloud-free':  # every file of a synced folder online only (2.6.0 #30)
+                return self.send_json(cleaner.free_cloud_folder(str(b.get('path', ''))))
+            if route == '/api/rename-back':  # undo a group of renames or moves (2.6.0 #40)
+                return self.send_json(self.rename_back(b.get('ids') or []))
             if route == '/api/root-gone':  # a monitored folder that is away was really deleted (2.4.2)
                 root = os.path.normpath(str(b.get('root', '')))
                 n = App.mon.forget_root_files(root)
@@ -2199,8 +2689,29 @@ class Handler(BaseHTTPRequestHandler):
                 if rest and root in App.mon.settings['roots'] and not App.mon.root_available(root):
                     self.update_settings({'roots': rest, 'drop_root': root})
                 return self.send_json({'ok': True, 'deleted': n})
+            if route == '/api/clean/git-gc':  # Git's own clean-up of one repository, on request (2.6.0 #29)
+                path = os.path.normpath(str(b.get('path', '')))
+                if not any(x['path'] == path for x in getattr(App, 'git_repos', [])) or not shutil.which('git'):
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                before = cleaner._tree_size(os.path.join(path, '.git'))
+                r = subprocess.run(['git', '-C', path, 'gc', '--prune=now', '--quiet'], capture_output=True, timeout=1800,
+                                   creationflags=NO_WINDOW)
+                after = cleaner._tree_size(os.path.join(path, '.git'))
+                return self.send_json({'ok': r.returncode == 0, 'freed': max(0, before - after), 'size': after,
+                                       'code': None if r.returncode == 0 else 'gitFailed'})
+            if route == '/api/clean/leftover-delete':  # one leftover folder, to the Recycle Bin (2.6.0 #2)
+                path = os.path.normpath(str(b.get('path', '')))
+                if not any(x['path'] == path for x in getattr(App, 'leftovers', [])) or cleaner.is_core(path):
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                if not recycle(path):
+                    return self.send_json({'ok': False, 'code': 'inUse'})
+                note_last_clean([path], next(x['size'] for x in App.leftovers if x['path'] == path))
+                App.leftovers = [x for x in App.leftovers if x['path'] != path]
+                return self.send_json({'ok': True})
             if route == '/api/clean/delete':  # one file of the biggest-files list, to the Recycle Bin
                 path = os.path.normpath(str(b.get('path', '')))
+                if is_pinned(path):
+                    return self.send_json({'ok': False, 'code': 'pinned'})  # kept forever (2.6.0 #20)
                 sc = _scans.get(cleaner.drive_of(path))
                 r = cleaner.delete_file(path, sc, recycle, permanent=bool(b.get('permanent')))
                 if r.get('ok'):
@@ -2260,6 +2771,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({'ok': True, 'count': len(App.mon.settings[key])})
             if route == '/api/forget':  # forget a file's old versions: keep the newest and noted ones (2.1.0)
                 p = str(b.get('path', ''))
+                if is_pinned(p):
+                    return self.send_json({'ok': False, 'code': 'pinned'})
                 rows = App.store.q('SELECT id FROM events WHERE path=? OR old_path=? ORDER BY id DESC', (p, p))
                 keep = {rows[0]['id']} if rows else set()
                 gone = [r['id'] for r in rows if r['id'] not in keep and r['id'] not in App.mon.notes]
@@ -2301,6 +2814,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.update_settings(b))
             if route == '/api/pick-folder':
                 return self.send_json({'path': pick_folder()})
+            if route == '/api/pin':  # keep forever (2.6.0 #20)
+                p, on = os.path.normpath(str(b.get('path', ''))), bool(b.get('on'))
+                if not self.allowed_path(p):
+                    return self.send_json({'ok': False, 'code': 'notAllowed'})
+                App.store.x('INSERT OR IGNORE INTO pins(path) VALUES(?)' if on else 'DELETE FROM pins WHERE path=?', (p,))
+                _pins['at'] = 0
+                return self.send_json({'ok': True, 'pinned': on})
             if route == '/api/star':
                 p, on = b['path'], bool(b.get('on'))
                 if not self.allowed_path(p):
@@ -2639,6 +3159,7 @@ class Handler(BaseHTTPRequestHandler):
                 'indexed': st.q('SELECT COUNT(*) n FROM ftsdoc')[0]['n'] if st.fts else None,
                 'db_bytes': sum(f.stat().st_size for f in DATA.glob('watch.db*')),
                 'snapshots': sum(1 for _ in iter_blobs()), 'errors': errors, 'integrity': App.integrity, 'warn': mon.warnings(),
+                'blobs_bad': len(App.store.meta('blobs_bad', [])), 'verify_last': App.store.meta('verify_last', 0),
                 'snap_format': SNAP_FORMAT}
 
     def export(self, qs):
@@ -2769,6 +3290,74 @@ class Handler(BaseHTTPRequestHandler):
         App.diff_cache[key] = res
         return res
 
+    def folder_at(self, folder, when, lang=None):
+        """Write ``folder`` as it was at time ``when`` into a new folder next to it — every file that existed
+        then, in the version it had then; nothing in the real folder is touched (2.6.0 #31)."""
+        folder = os.path.normpath(folder)
+        if not self.allowed_path(folder) or not os.path.isdir(folder):
+            return {'ok': False, 'code': 'notAllowed'}
+        lo = folder.rstrip('\\') + '\\'
+        hi = lo[:-1] + chr(ord('\\') + 1)
+        state = {}  # path -> hash at ``when`` (None: did not exist then)
+        for p, c in list(App.mon.confirmed.items()):  # what is known now, in case nothing changed since
+            if p.startswith(lo):
+                state[p] = c[2]
+        later = App.store.q('SELECT * FROM events WHERE ((path >= ? AND path < ?) OR (old_path >= ? AND old_path < ?)) AND ts > ?'
+                            ' ORDER BY id DESC', (lo, hi, lo, hi, when))
+        for r in later:  # walk back from now to ``when``: undo each later change
+            if r['kind'] == 'created':
+                state[r['path']] = None
+            elif r['kind'] == 'deleted':
+                state[r['path']] = r['prev_hash']
+            elif r['kind'] == 'modified':
+                state[r['path']] = r['prev_hash']
+            elif r['kind'] == 'renamed':
+                h = state.pop(r['path'], r['hash'])
+                if r['old_path'] and r['old_path'].startswith(lo):
+                    state[r['old_path']] = h
+        word = 'as of' if lang != 'zh' else '截至'
+        dest = f'{folder} ({word} {time.strftime("%Y-%m-%d %H-%M", time.localtime(when))})'
+        n = 2
+        while os.path.exists(long_path(dest)):
+            dest, n = f'{folder} ({word} {time.strftime("%Y-%m-%d %H-%M", time.localtime(when))}) ({n})', n + 1
+        done = missing = 0
+        for p, h in state.items():
+            if h is None:
+                continue
+            if not App.store.has_blob(h):
+                missing += 1
+                continue
+            out = os.path.join(dest, os.path.relpath(p, folder))
+            try:
+                os.makedirs(long_path(os.path.dirname(out)), exist_ok=True)
+                App.store.copy_blob(h, out)
+                done += 1
+            except OSError:
+                missing += 1
+        return {'ok': True, 'path': dest, 'files': done, 'missing': missing}
+
+    def rename_back(self, ids):
+        """Give renamed or moved files their old names back, newest first; never overwrites (2.6.0 #40)."""
+        done, skipped = [], []
+        rows = [r[0] for r in (App.store.q("SELECT * FROM events WHERE id=? AND kind='renamed'", (int(i),)) for i in ids[:5000]) if r]
+        for r in sorted(rows, key=lambda r: -r['id']):
+            cur, old = r['path'], r['old_path']
+            if not (old and self.allowed_path(cur) and self.allowed_path(old)):
+                skipped.append({'path': cur, 'code': 'notAllowed'})
+            elif not os.path.exists(long_path(cur)):
+                skipped.append({'path': cur, 'code': 'gone'})
+            elif os.path.exists(long_path(old)):
+                skipped.append({'path': cur, 'code': 'taken'})
+            else:
+                try:
+                    os.makedirs(long_path(os.path.dirname(old)), exist_ok=True)
+                    os.rename(long_path(cur), long_path(old))
+                    done.append(old)
+                except OSError:
+                    skipped.append({'path': cur, 'code': 'inUse'})
+        App.mon.wake.set()
+        return {'ok': True, 'done': len(done), 'skipped': skipped}
+
     def restore(self, b):
         r = App.store.q('SELECT * FROM events WHERE id=?', (int(b['id']),))[0]
         h = r['prev_hash'] if b.get('version') == 'prev' else (r['hash'] or r['prev_hash'])
@@ -2783,7 +3372,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 App.store.copy_blob(h, target)
             except RestoreError as e:
-                return {'ok': False, 'code': e.code, 'path': target}
+                return {'ok': False, 'code': e.code, 'path': target, 'by': cleaner.lockers(target) if e.code == 'inUse' else []}
+            milestone('restored', 1)
             return {'ok': True, 'path': target, 'replaced': True}
         if os.path.exists(long_path(target)):
             target = restore_copy_name(target, b.get('lang'))
@@ -2792,6 +3382,7 @@ class Handler(BaseHTTPRequestHandler):
             App.store.copy_blob(h, target)
         except RestoreError as e:
             return {'ok': False, 'code': e.code, 'path': target}
+        milestone('restored', 1)
         m = r['mtime'] if b.get('version') != 'prev' else None  # keep the version's own date when known (2.0.1)
         if m:
             try:
@@ -2877,6 +3468,8 @@ class Handler(BaseHTTPRequestHandler):
             new['notify'] = b['notify']
         if 'prescan' in b:
             new['prescan'] = bool(b['prescan'])
+        if 'milestones' in b:
+            new['milestones'] = bool(b['milestones'])  # 2.6.0 #50
         scope_changed = any(new.get(k) != s.get(k) for k in ('roots', 'exclude_exts', 'exclude_names', 'exclude_dirs', 'exclude_paths'))
         with App.mon.lock:
             removed_roots = set(s['roots']) - set(new['roots'])
@@ -2926,6 +3519,25 @@ def recycle(path):
     # FOF_WANTNUKEWARNING (0x4000): should Windows still want to delete for good, it asks first
     op = SHFILEOPSTRUCTW(None, 3, path + '\0', None, 0x40 | 0x10 | 0x4 | 0x400 | 0x4000, False, None, None)
     return ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) == 0 and not op.fAnyOperationsAborted and not os.path.exists(path)
+
+
+def recycle_many(paths):
+    """Move many files to the Recycle Bin in one Windows call per batch (2.6.0 #7); returns those moved."""
+    if os.name != 'nt' or not paths:
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [('hwnd', wintypes.HWND), ('wFunc', wintypes.UINT), ('pFrom', wintypes.LPCWSTR), ('pTo', wintypes.LPCWSTR),
+                    ('fFlags', ctypes.c_ushort), ('fAnyOperationsAborted', wintypes.BOOL), ('hNameMappings', ctypes.c_void_p),
+                    ('lpszProgressTitle', wintypes.LPCWSTR)]
+    ok = [p for p in paths if not cleaner.recycle_problem(p)]  # never "to the Recycle Bin" that would really be gone
+    for i in range(0, len(ok), 400):
+        batch = ok[i:i + 400]
+        op = SHFILEOPSTRUCTW(None, 3, '\0'.join(batch) + '\0\0', None, 0x40 | 0x10 | 0x4 | 0x400 | 0x4000, False, None, None)
+        ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    return [p for p in ok if not os.path.exists(p)]
 
 
 def pick_save(name, folder=''):
@@ -3015,11 +3627,11 @@ for _lang, _extra in {
     'en': {'pause_indef': 'Until I resume', 'pause_30': 'For 30 minutes', 'pause_120': 'For 2 hours',
            'tip_paused_until': 'DeskTrace — paused until {t}', 'mute_60': 'Mute for 1 hour',
            'mute_tomorrow': 'Mute until 8:00 tomorrow', 'unmute': 'Unmute (muted until {t})',
-           'shell_label': 'DeskTrace: show history'},
+           'shell_label': 'DeskTrace: show history', 'shell_deleted': 'DeskTrace: deleted files here'},
     'zh': {'pause_indef': '直到手动继续', 'pause_30': '30 分钟', 'pause_120': '2 小时',
            'tip_paused_until': '桌迹 — 已暂停，{t} 自动继续', 'mute_60': '静音 1 小时',
            'mute_tomorrow': '静音到明早 8:00', 'unmute': '取消静音（原定静音到 {t}）',
-           'shell_label': '桌迹：查看历史版本'},
+           'shell_label': '桌迹：查看历史版本', 'shell_deleted': '桌迹：找回这里删除的文件'},
 }.items():
     TEXT[_lang].update(_extra)
 for _lang, _extra in {
@@ -3137,6 +3749,8 @@ class Notifier:
     def add(self, ev):
         if time.time() < float(App.mon.settings.get('mute_until') or 0):
             return  # "do not disturb"
+        if user_busy_fullscreen():
+            return  # a presentation, a meeting shared full screen, a game or a video: no pop-ups (2.6.0 #39)
         policy = App.mon.settings.get('notify', 'off')
         starred = ev.get('path') in App.mon.stars or ev.get('old_path') in App.mon.stars
         if not starred and (policy == 'off' or (policy == 'deleted' and ev['kind'] != 'deleted')):
@@ -3226,6 +3840,9 @@ def set_mute(minutes=0, until=None):
 
 
 SHELL_KEY = r'Software\Classes\*\shell\DesktopWatch'  # per-user: no admin rights, nothing system-wide
+# 2.6.0 #4: on a folder and on a folder's empty space: "DeskTrace: deleted files here" (%1 = the folder, %V = the open folder)
+SHELL_DIR_KEYS = ((r'Software\Classes\Directory\shell\DeskTraceDeleted', '%1'),
+                  (r'Software\Classes\Directory\Background\shell\DeskTraceDeleted', '%V'))
 
 
 def shell_menu_enabled():
@@ -3250,8 +3867,14 @@ def set_shell_menu(on):
             winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, str(STATIC / 'icon.ico'))
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, SHELL_KEY + r'\command') as k:
             winreg.SetValueEx(k, '', 0, winreg.REG_SZ, f'"{pythonw()}" "{APP_DIR / "server.py"}" --show "%1"')
+        for key, arg in SHELL_DIR_KEYS:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key) as k:
+                winreg.SetValueEx(k, '', 0, winreg.REG_SZ, tr('shell_deleted'))
+                winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, str(STATIC / 'icon.ico'))
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key + r'\command') as k:
+                winreg.SetValueEx(k, '', 0, winreg.REG_SZ, f'"{pythonw()}" "{APP_DIR / "server.py"}" --show-deleted "{arg}"')
     else:
-        for sub in (SHELL_KEY + r'\command', SHELL_KEY):
+        for sub in (SHELL_KEY + r'\command', SHELL_KEY) + tuple(x for k, _ in SHELL_DIR_KEYS for x in (k + r'\command', k)):
             try:
                 winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
             except OSError:
@@ -3350,6 +3973,8 @@ def tray_command(name):
         open_window(App.notify_hash or '')
     elif name == 'update':
         open_window('#update')
+    elif name == 'quick-restore':  # Ctrl+Alt+Z (2.6.0 #14)
+        open_window('#recent')
     elif name.startswith('event:'):
         open_window('#event=' + name.split(':', 1)[1])
     elif name == 'toggle-pause':
@@ -3381,7 +4006,9 @@ def tray_status(status):
         tip = tr('tip', n=f"{status['files']:,}", c=today)
     if status.get('warn'):  # history may be incomplete: the tray says so too (2.3.0)
         tip = tr('tip_warn') + '\n' + tip
-    App.tray.update(tooltip=tip, paused=status['paused'])
+    burst = sum(n for t0, n in getattr(App.mon, '_burst', []) if time.time() - t0 < 15)
+    state = 'alert' if 'mass' in (status.get('warn') or []) else 'busy' if burst >= 20 else None  # 2.6.0 #45
+    App.tray.update(tooltip=tip, paused=status['paused'], state=state)
 
 
 def background_thread():
@@ -3439,6 +4066,22 @@ def on_battery():
                         ('life', ctypes.c_ulong), ('full', ctypes.c_ulong)]
         st = SPS()
         return bool(ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(st))) and st.ac == 0
+    except Exception:
+        return False
+
+
+def battery_low():
+    """On battery with 20 % or less left (2.6.0 #41)."""
+    if os.name != 'nt':
+        return False
+    try:
+        import ctypes
+
+        class SPS(ctypes.Structure):
+            _fields_ = [('ac', ctypes.c_ubyte), ('flag', ctypes.c_ubyte), ('pct', ctypes.c_ubyte), ('saver', ctypes.c_ubyte),
+                        ('life', ctypes.c_ulong), ('full', ctypes.c_ulong)]
+        st = SPS()
+        return bool(ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(st))) and st.ac == 0 and st.pct <= 20
     except Exception:
         return False
 
@@ -3514,6 +4157,7 @@ def start_tray():
     if not traymod.available:
         return None
     t = traymod.Tray(STATIC / 'icon.ico', STATIC / 'icon-paused.ico', tray_command, tray_menu, commands=TRAY_COMMANDS)
+    t.state_icons = {'busy': STATIC / 'icon-busy.ico', 'alert': STATIC / 'icon-alert.ico'}  # 2.6.0 #45
     if not t.start():
         print('tray icon could not be added')
         return None
@@ -3726,6 +4370,7 @@ def main():
     ap.add_argument('--no-tray', action='store_true', help='do not show a notification-area icon')
     ap.add_argument('--data', help='use another data folder (e.g. for a separate test instance)')
     ap.add_argument('--show', metavar='FILE', help="open the page at this file's history (Explorer's right-click entry)")
+    ap.add_argument('--show-deleted', metavar='FOLDER', help='open the files deleted in this folder (Explorer, 2.6.0 #4)')
     ap.add_argument('--quit', action='store_true', help='stop the running instance cleanly (used by the installer)')
     args = ap.parse_args()
     if args.data:
@@ -3735,9 +4380,16 @@ def main():
         quit_running()
         return
     fragment = '#file=' + urllib.parse.quote(os.path.abspath(args.show)) if args.show else ''
+    if args.show_deleted:
+        fragment = '#deleted=' + urllib.parse.quote(os.path.abspath(args.show_deleted))
 
     if not args.data:
         adopt_legacy_data()
+    if not running_port(args.port):
+        try:
+            apply_pending_import()  # a history brought from another PC (2.6.0 #44)
+        except OSError as e:
+            print('import not applied:', repr(e))
     BLOBS.mkdir(parents=True, exist_ok=True)
     setup_log()
     port = running_port(args.port)

@@ -1063,3 +1063,63 @@ label.card.cl-item.on { border-color: var(--accent); }
 .cl-cell.sub.rest { background: color-mix(in srgb, var(--cell) 30%, var(--panel)); }
 
 .warn-text { color: var(--deleted); }
+
+/* 2.6.0: Space Spikes Radar */
+.gr-box label { display: flex; align-items: center; gap: 10px; }
+.gr-box .seg { margin-left: auto; }
+.gr-row .nm { display: flex; flex-direction: column; min-width: 0; }
+.gr-path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gr-row .bar i { background: var(--deleted); }
+.gr-plus { color: var(--deleted); }
+
+/* 2.6.0 #16 restorability */
+.rs-ok, .rs-no { margin-left: 8px; font-size: 11px; padding: 1px 7px; border-radius: 99px; white-space: nowrap; }
+.rs-ok { background: var(--created-soft); color: var(--created); }
+.rs-no { background: var(--deleted-soft); color: var(--deleted); }
+
+.wt-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* 2.6.0 #6 */
+.warn-bar.danger { border-color: var(--deleted); background: var(--deleted-soft); }
+
+.dk-health { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 9px; border-radius: 99px; }
+.dk-health svg { width: 13px; height: 13px; }
+.dk-health.ok { background: var(--created-soft); color: var(--created); }
+.dk-health.bad { background: var(--deleted-soft); color: var(--deleted); }
+
+.pin-btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+.gone-lead.drafts { display: block; }
+.dr-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+.dr-row .mono { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 2.6.0 #11 time slider */
+.scrub-bar { display: flex; gap: 12px; align-items: center; padding: 8px 4px; }
+.scrub-bar input[type=range] { flex: 1; }
+.scrub-view { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-bottom: 10px; }
+.scrub-text { margin: 0; font: 12.5px/1.5 Consolas, "Cascadia Mono", monospace; white-space: pre-wrap; }
+
+/* 2.6.0 #38 evolution tree */
+.lt { display: block; margin: 6px 0 10px; }
+.lt-main { stroke: var(--accent); stroke-width: 3; }
+.lt-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.lt-br { fill: none; stroke: var(--renamed); stroke-width: 2; }
+.lt-tx { font-size: 12px; fill: var(--text); }
+
+/* 2.6.0 #32 similar photos */
+.sim-group { display: flex; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.sim-item { margin: 0; width: 160px; position: relative; }
+.sim-item img { width: 160px; height: 120px; object-fit: cover; border-radius: 8px; display: block; background: var(--line); }
+.sim-item.best img { outline: 2px solid var(--created); }
+.sim-item figcaption { font-size: 11.5px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-acts { display: flex; gap: 4px; margin-top: 4px; }
+
+/* 2.6.0: name above its path in the new Clean up lists */
+.sp-folder .nm:has(.gr-path) { display: flex; flex-direction: column; min-width: 0; }
+.gr-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Gemini 2.6.0 Q-5: the drawer of extra lists */
+.cl-drawer { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; margin: 12px 0; }
+.cl-drawer > summary { cursor: pointer; padding: 4px 0; list-style-position: inside; }
+.cl-drawer[open] > summary { margin-bottom: 8px; }
+.dw-badge { font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-left: 6px; }

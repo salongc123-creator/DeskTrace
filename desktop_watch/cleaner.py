@@ -115,6 +115,36 @@ def online_only(path):
         return False
 
 
+def cloud_overview():
+    """Each cloud-synced folder with the space its files take on this PC and how many are online-only
+    (2.6.0 #30). Reading attributes never downloads anything."""
+    out = []
+    for root in cloud_roots():
+        local = local_n = online = 0
+        for d, dirs, files in os.walk(root):
+            for f in files:
+                try:
+                    st = os.stat(os.path.join(d, f), follow_symlinks=False)
+                except OSError:
+                    continue
+                if getattr(st, 'st_file_attributes', 0) & ONLINE_ONLY:
+                    online += 1
+                else:
+                    local, local_n = local + st.st_size, local_n + 1
+        out.append({'path': root, 'name': os.path.basename(root), 'local': local, 'local_n': local_n, 'online_n': online})
+    return out
+
+
+def free_cloud_folder(root):
+    """Ask the cloud service to keep every file of ``root`` online only (attrib -P +U, recursive): the local
+    copies are freed, the files stay in the cloud and in the folder (2.6.0 #30)."""
+    if root not in cloud_roots() or not os.path.isdir(root):
+        return {'ok': False, 'code': 'notAllowed'}
+    import subprocess
+    r = subprocess.run(['attrib', '-P', '+U', os.path.join(root, '*'), '/S', '/D'], capture_output=True, creationflags=0x08000000)
+    return {'ok': r.returncode == 0}
+
+
 def keep_online_only(path):
     """Ask the cloud service to free the local copy (it stays in the cloud and in the folder)."""
     if not cloud_root_of(path) or not os.path.isfile(path):
@@ -258,6 +288,37 @@ def chat_apps():
             exe = _first(*exes) or next((x for n, x in installed if any(k == n or (len(k) > 2 and k in n) for k in names[app])
                                          and not (app == 'qq' and 'music' in n)), None)
             out.append({'id': 'app_' + app, 'app': app, 'data': data, 'exe': exe})
+    return out
+
+
+CHAT_KIND = {'image': 'picture', 'images': 'picture', 'pic': 'picture', 'imagefiles': 'picture', 'img': 'picture', 'thumb': 'picture',
+             'video': 'video', 'videos': 'video', 'file': 'file', 'files': 'file', 'filerecv': 'file', 'attach': 'file',
+             'msgattach': 'file', 'cache': 'cache', 'temp': 'cache', 'tmp': 'cache', 'sns': 'cache', 'resource_cache': 'cache'}
+CHAT_NEVER = {'db_storage', 'database', 'nt_db', 'config', 'backup', 'msgbackup', 'msg_db', 'favorite', 'favorites'}
+
+
+def chat_media(data, days=90):
+    """Received pictures, videos, files and caches in a chat app's folder, older than ``days`` days, by kind
+    (2.6.0 #7): {kind: [(path, size), ...]}. Databases, configuration and backups are never included."""
+    limit, out = time.time() - days * 86400, {'picture': [], 'video': [], 'file': [], 'cache': []}
+    for d, dirs, files in os.walk(data):
+        parts = [x.lower() for x in os.path.relpath(d, data).split(os.sep)]
+        if any(p in CHAT_NEVER for p in parts):
+            dirs[:] = []
+            continue
+        kind = next((CHAT_KIND[p] for p in reversed(parts) if p in CHAT_KIND), None)
+        if not kind:
+            continue
+        for f in files:
+            if os.path.splitext(f)[1].lower() in DATABASES:
+                continue  # a database, wherever it is: never
+            p = os.path.join(d, f)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if st.st_mtime < limit:
+                out[kind].append((p, st.st_size))
     return out
 
 
@@ -752,7 +813,7 @@ class DriveScan:
         """The folders directly inside ``folder`` with what they take, biggest first."""
         out = [(self.dirs[d][0], self.dirs[d][1], d) for d in self.kids.get(self.key(folder), []) if d in self.dirs]
         win = os.path.join(env('WINDIR', r'C:\Windows'), 'WinSxS')
-        return [{'path': d, 'name': os.path.basename(d) or d, 'size': s, 'files': n,
+        return [{'path': d, 'name': os.path.basename(d) or d, 'size': s, 'files': n, 'movable': movable(d, s),
                  'shared': self.shared if os.path.normcase(d) == os.path.normcase(win) else 0} for s, n, d in sorted(out, reverse=True)]
 
     def own_files(self, folder, n=60):
@@ -1050,6 +1111,80 @@ def _globs(base, pattern_parts):
     return out
 
 
+DEV_DEPS = {'node_modules': ('package.json',), 'target': ('Cargo.toml',), '.venv': None, 'venv': None, 'env': None}
+_dev = {'at': 0, 'dirs': []}
+
+
+def dev_dirs(home=None, days=30, max_depth=6):
+    """Dependency folders that a build tool makes again (2.6.0 #8): node_modules next to package.json, a Rust
+    target next to Cargo.toml, a Python virtual environment (it has pyvenv.cfg) — only in projects whose own
+    files have not changed for ``days`` days. AppData and hidden folders are not searched. Cached 10 minutes."""
+    if home is None and time.time() - _dev['at'] < 600:
+        return list(_dev['dirs'])
+    root = home or env('USERPROFILE')
+    limit, out = time.time() - days * 86400, []
+    stack = [(root, 0)]
+    while stack:
+        d, depth = stack.pop()
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        names = {e.name for e in entries}
+        newest = 0
+        for e in entries:
+            try:
+                if e.is_file(follow_symlinks=False):
+                    newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
+            except OSError:
+                pass
+        for e in entries:
+            try:
+                if not e.is_dir(follow_symlinks=False) or e.stat(follow_symlinks=False).st_file_attributes & REPARSE:
+                    continue
+            except (OSError, AttributeError):
+                continue
+            n = e.name
+            if n in DEV_DEPS:
+                need = DEV_DEPS[n]
+                ok = (any(x in names for x in need) if need else os.path.isfile(os.path.join(e.path, 'pyvenv.cfg')))
+                if ok:
+                    if newest and newest < limit:
+                        out.append(e.path)
+                    continue  # never look inside a dependency folder
+            if depth >= max_depth or n.startswith('.') or (depth == 0 and n.lower() in ('appdata', 'onedrive')):
+                continue
+            stack.append((e.path, depth + 1))
+    if home is None:
+        _dev.update(at=time.time(), dirs=out)
+    return out
+
+
+_health = {'at': 0, 'disks': []}
+
+
+def disk_health():
+    """Each physical disk's health as Windows itself reports it (Get-PhysicalDisk; no administrator rights,
+    so no detailed SMART counters) — cached for an hour (2.6.0 #34)."""
+    if time.time() - _health['at'] < 3600:
+        return _health['disks']
+    import json
+    import subprocess
+    disks = []
+    try:
+        r = subprocess.run(['powershell', '-NoProfile', '-Command',
+                            'Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,OperationalStatus,Size | ConvertTo-Json -Compress'],
+                           capture_output=True, text=True, timeout=20, creationflags=0x08000000)
+        data = json.loads(r.stdout or '[]')
+        for d in data if isinstance(data, list) else [data]:
+            disks.append({'name': d.get('FriendlyName') or '', 'media': d.get('MediaType') or '', 'size': d.get('Size') or 0,
+                          'health': str(d.get('HealthStatus') or ''), 'status': str(d.get('OperationalStatus') or '')})
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    _health.update(at=time.time(), disks=disks)
+    return disks
+
+
 def places():
     """Every known place that only holds things that can be thrown away, with how and what it means."""
     la, home, win = env('LOCALAPPDATA'), env('USERPROFILE'), env('WINDIR', r'C:\Windows')
@@ -1063,6 +1198,18 @@ def places():
          'paths': _globs(os.path.join(la, 'Google', 'Chrome', 'User Data'), cache_parts)},
         {'id': 'firefox', 'icon': 'globe', 'how': 'delete', 'level': 'safe',
          'paths': _globs(os.path.join(la, 'Mozilla', 'Firefox', 'Profiles'), ['cache2'])},
+        # 2.6.0 #18: other browsers — only their caches; bookmarks, passwords and history are never touched
+        {'id': 'otherbrowsers', 'icon': 'globe', 'how': 'delete', 'level': 'safe',
+         'paths': [p for base in (os.path.join(la, 'BraveSoftware', 'Brave-Browser', 'User Data'), os.path.join(la, 'Vivaldi', 'User Data'),
+                                  os.path.join(la, '360Chrome', 'Chrome', 'User Data'), os.path.join(la, 'Tencent', 'QQBrowser', 'User Data'))
+                   for p in _globs(base, cache_parts)]
+                  + [os.path.join(la, 'Opera Software', 'Opera Stable', 'Cache'), os.path.join(env('APPDATA'), 'Opera Software', 'Opera Stable', 'Cache')]},
+        # 2.6.0 #36: shader caches of the graphics drivers and DirectX — rebuilt when a game or app needs them
+        {'id': 'shaders', 'icon': 'image', 'how': 'delete', 'level': 'safe', 'fresh': True,
+         'paths': [os.path.join(la, 'NVIDIA', 'DXCache'), os.path.join(la, 'NVIDIA', 'GLCache'), os.path.join(la, 'NVIDIA Corporation', 'NV_Cache'),
+                   os.path.join(la, 'AMD', 'DxCache'), os.path.join(la, 'AMD', 'DxcCache'), os.path.join(la, 'AMD', 'GLCache'),
+                   os.path.join(la, 'AMD', 'VkCache'), os.path.join(env('USERPROFILE'), 'AppData', 'LocalLow', 'Intel', 'ShaderCache'),
+                   os.path.join(la, 'D3DSCache')]},
         {'id': 'crash', 'icon': 'warn', 'how': 'delete', 'level': 'safe',
          'paths': [os.path.join(la, 'CrashDumps'), os.path.join(la, 'Microsoft', 'Windows', 'WER'),
                    os.path.join(env('ProgramData', r'C:\ProgramData'), 'Microsoft', 'Windows', 'WER', 'ReportArchive')]},
@@ -1071,6 +1218,14 @@ def places():
         {'id': 'devcache', 'icon': 'code', 'how': 'delete', 'level': 'safe',
          'paths': [os.path.join(la, 'pip', 'cache'), os.path.join(la, 'npm-cache'), os.path.join(la, 'Yarn', 'Cache'),
                    os.path.join(home, '.cache', 'pip')]},
+        {'id': 'devprojects', 'icon': 'code', 'how': 'delete', 'level': 'safe', 'paths': dev_dirs()},  # 2.6.0 #8
+        {'id': 'compress', 'icon': 'archive', 'how': 'compress', 'level': 'safe', 'files': True,  # 2.6.0 #15
+         'paths': [home], 'only': compressible_files()},
+        {'id': 'brokenlinks', 'icon': 'open', 'how': 'recycle', 'level': 'safe', 'files': True,  # 2.6.0 #12
+         'paths': [os.path.join(home, 'Desktop'), os.path.join(env('APPDATA'), 'Microsoft', 'Windows', 'Start Menu'),
+                   os.path.join(home, 'Downloads')], 'only': broken_shortcuts() + empty_folders()},
+        {'id': 'oldinstallers', 'icon': 'download', 'how': 'recycle', 'level': 'safe', 'files': True,  # 2.6.0 #33
+         'paths': [os.path.join(home, 'Downloads')], 'only': old_installer_versions()},
         {'id': 'installers', 'icon': 'download', 'how': 'recycle', 'level': 'safe', 'files': True, 'old_days': 30,
          'paths': [os.path.join(home, 'Downloads')], 'exts': INSTALLERS},
         {'id': 'winupdate', 'icon': 'shield', 'how': 'admin', 'level': 'safe',
@@ -1078,13 +1233,538 @@ def places():
         {'id': 'memdump', 'icon': 'warn', 'how': 'admin', 'level': 'safe', 'files': True,
          'paths': [win, os.path.join(win, 'Minidump')], 'exts': {'.dmp'}},
         {'id': 'winold', 'icon': 'shield', 'how': 'admin', 'level': 'safe', 'paths': [os.path.join(system_drive(), 'Windows.old')]},
+        {'id': 'winupgrade', 'icon': 'shield', 'how': 'admin', 'level': 'safe',  # 2.6.0 #9
+         'paths': [os.path.join(system_drive(), n) for n in ('$Windows.~BT', '$Windows.~WS', '$SysReset', '$GetCurrent')]},
         {'id': 'recycle', 'icon': 'trash', 'how': 'empty', 'level': 'caution', 'paths': []},
     ]
+
+
+_links = {'at': 0, 'items': []}
+
+
+def broken_shortcuts(folders=None):
+    """Shortcuts (.lnk) on the Desktop and in the Start menu whose target no longer exists — left behind by
+    uninstalled programs (2.6.0 #12). Targets are read by Windows itself (one PowerShell call); shortcuts to
+    network places, URLs or without a file target are never counted as broken. Cached 10 minutes."""
+    if folders is None and time.time() - _links['at'] < 600:
+        return list(_links['items'])
+    import json
+    import subprocess
+    folders = folders or [os.path.join(env('USERPROFILE'), 'Desktop'), os.path.join(env('APPDATA'), 'Microsoft', 'Windows', 'Start Menu')]
+    lnks = []
+    for f in folders:
+        for d, _, files in os.walk(f):
+            lnks += [os.path.join(d, n) for n in files if n.lower().endswith('.lnk')]
+    out = []
+    if lnks:
+        script = ('[Console]::InputEncoding = [Text.Encoding]::UTF8; [Console]::OutputEncoding = [Text.Encoding]::UTF8; '  # Chinese paths
+                  '$s = New-Object -ComObject WScript.Shell; $in = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
+                  '$in | ForEach-Object { try { $s.CreateShortcut($_).TargetPath } catch { "" } } | ConvertTo-Json -Compress')
+        try:
+            r = subprocess.run(['powershell', '-NoProfile', '-Command', script], input=json.dumps(lnks), capture_output=True,
+                               text=True, encoding='utf-8', timeout=60, creationflags=0x08000000)
+            targets = json.loads(r.stdout or '[]')
+            targets = targets if isinstance(targets, list) else [targets]
+            for lnk, tgt in zip(lnks, targets):
+                tgt = tgt or ''
+                if len(tgt) > 3 and tgt[1:3] == ':\\' and os.path.isdir(tgt[:3]) and not os.path.exists(tgt):
+                    out.append(lnk)  # a local drive that is there, and the target is not
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    if folders is None or folders == [os.path.join(env('USERPROFILE'), 'Desktop'), os.path.join(env('APPDATA'), 'Microsoft', 'Windows', 'Start Menu')]:
+        _links.update(at=time.time(), items=out)
+    return out
+
+
+def empty_folders(folder=None):
+    """Folders in Downloads with nothing at all inside (also no hidden files) (2.6.0 #12)."""
+    folder = folder or os.path.join(env('USERPROFILE'), 'Downloads')
+    out = []
+    for d, dirs, files in os.walk(folder, topdown=False):
+        if d != folder and not files and not any(os.path.join(d, x) not in out for x in dirs):
+            try:
+                if not os.stat(d).st_file_attributes & REPARSE:
+                    out.append(d)
+            except (OSError, AttributeError):
+                pass
+    return [d for d in out if not any(d != o and d.startswith(o + os.sep) for o in out)]  # the outermost empty folder
+
+
+LEFTOVER_SAFE = {'microsoft', 'windows', 'packages', 'temp', 'tmp', 'comms', 'connecteddevicesplatform', 'd3dscache', 'crashdumps',
+                 'programs', 'publishers', 'virtualstore', 'nvidia', 'nvidiacorporation', 'intel', 'amd', 'apple', 'applecomputer',
+                 'history', 'packagecache', 'packagecachesettings', 'ssh', 'npmcache', 'pip', 'yarn', 'desktoptrace', 'desktopwatch',
+                 'regid19910811commicrosoft', 'usoshared', 'usoprivate', 'softwaredistribution', 'ssoxsoft', 'mozilla', 'google',
+                 'package cache', 'paquetes', 'identities', 'peerdistrepub', 'oem', 'dell', 'lenovo', 'hp', 'asus', 'acer', 'realtek'}
+
+
+# never suggested: game saves, software licences and activation, Windows accessibility (2.6.0 #2)
+LEFTOVER_KEEP = ('save', 'licens', 'sentinel', 'flexnet', 'activation', 'narrator', 'voiceaccess', 'magnifier', 'backup', 'profile',
+                 # vendors and game platforms that register under other names (Gemini 2.6.0 Q-3)
+                 'dingtalk', 'alipay', 'taobao', 'aliworkbench', 'wechat', 'weixin', 'tencent', 'qq', 'wegame', 'steam', 'epicgames',
+                 'hypergryph', 'mihoyo', 'hoyoverse', 'gog', 'blizzard', 'battle.net', 'riot', 'ubisoft', 'electronicarts', 'origin',
+                 'netease', 'bytedance', 'douyin', 'baidu', 'kingsoft', 'wps', 'xunlei', 'thunder', 'huawei', 'xiaomi')
+SAVE_EXTS = {'.sav', '.save', '.sl2', '.savegame', '.ess', '.rvdata2', '.profile'}
+
+
+def _norm(x):
+    return ''.join(ch for ch in x.lower() if ch.isalnum())
+
+
+def installed_words():
+    """Names that tell an installed program: display names, publishers and install folders from the
+    uninstall list, Program Files folders and Start-menu folders (2.6.0 #2)."""
+    words = set()
+    if os.name == 'nt':
+        import winreg
+        for hive, key in ((winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
+                          (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'),
+                          (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Uninstall')):
+            try:
+                with winreg.OpenKey(hive, key) as k:
+                    for i in range(winreg.QueryInfoKey(k)[0]):
+                        try:
+                            with winreg.OpenKey(k, winreg.EnumKey(k, i)) as a:
+                                for v in ('DisplayName', 'Publisher', 'InstallLocation'):
+                                    try:
+                                        val = str(winreg.QueryValueEx(a, v)[0])
+                                    except OSError:
+                                        continue
+                                    if v == 'InstallLocation':
+                                        parts = [p for p in val.strip('"\\').split('\\') if p][-2:]
+                                        words.update(_norm(p) for p in parts)
+                                    else:
+                                        words.add(_norm(val))
+                                        words.update(_norm(w) for w in val.split() if len(w) >= 4)
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+    k = known_dirs()
+    for base in k['programs'] + [os.path.join(env('LOCALAPPDATA'), 'Programs'),
+                                 os.path.join(env('APPDATA'), 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+                                 os.path.join(env('ProgramData', r'C:\ProgramData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')]:
+        try:
+            words.update(_norm(e.name) for e in os.scandir(base) if e.is_dir())
+        except OSError:
+            pass
+    return {w for w in words if len(w) >= 3}
+
+
+def _still_used(folder, days=90):
+    """True if ``folder`` holds a program (.exe) or anything in its first two levels changed in ``days`` days."""
+    limit = time.time() - days * 86400
+    stack = [(folder, 0)]
+    while stack:
+        d, depth = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if 'save' in e.name.lower():
+                                return True  # a folder of game saves
+                            if depth < 2:
+                                stack.append((e.path, depth + 1))
+                            continue
+                        low = e.name.lower()
+                        if (low.endswith('.exe') or os.path.splitext(low)[1] in SAVE_EXTS
+                                or e.stat(follow_symlinks=False).st_mtime > limit):
+                            return True  # a program, a game save, or still in use
+                    except OSError:
+                        pass
+        except OSError:
+            return True  # cannot look inside: never suggest it
+    return False
+
+
+def leftovers(sizes, words=None, min_size=300 * 2 ** 20):
+    """Folders directly in AppData (Roaming, Local) or ProgramData, of ``min_size`` or more, whose name matches
+    no installed program, publisher or install folder: possibly left behind by an uninstalled program
+    (2.6.0 #2). ``sizes`` is folder -> bytes from the last scan. Only a hint: shown one by one, never ticked."""
+    words = installed_words() if words is None else words
+    bases = [env('APPDATA'), env('LOCALAPPDATA'), env('ProgramData', r'C:\ProgramData')]
+    out = []
+    for base in bases:
+        try:
+            entries = [e for e in os.scandir(base) if e.is_dir(follow_symlinks=False)]
+        except OSError:
+            continue
+        for e in entries:
+            n = _norm(e.name)
+            size = sizes.get(e.path) or sizes.get(os.path.normpath(e.path)) or 0
+            if size < min_size or not n or n in LEFTOVER_SAFE or e.name.startswith(('.', '{', '$')) or is_core(e.path):
+                continue
+            if any(len(w) >= 4 and (n in w or w in n) for w in words) or n in words:
+                continue
+            if any(k in n for k in LEFTOVER_KEEP) or _still_used(e.path):
+                continue  # a program lives here (an .exe) or still writes here: not a leftover
+            out.append({'path': e.path, 'name': e.name, 'size': size, 'where': os.path.basename(base)})
+    return sorted(out, key=lambda x: -x['size'])
+
+
+def lockers_many(paths, limit=20000):
+    """Programs that have any of ``paths`` open (Restart Manager, in batches); [] when none (Gemini 2.6.0 Q-2)."""
+    found = set()
+    for i in range(0, min(len(paths), limit), 500):
+        found.update(lockers(paths[i:i + 500]))
+    return sorted(found)
+
+
+def lockers(path):
+    """Names of the programs that have ``path`` open, as Windows' Restart Manager reports them (2.6.0 #19);
+    [] when none or when Windows cannot tell. Read-only: nothing is closed."""
+    if os.name != 'nt':
+        return []
+    try:
+        rm = ctypes.WinDLL('rstrtmgr')
+
+        class RM_UNIQUE_PROCESS(ctypes.Structure):
+            _fields_ = [('pid', wintypes.DWORD), ('start', wintypes.FILETIME)]
+
+        class RM_PROCESS_INFO(ctypes.Structure):
+            _fields_ = [('proc', RM_UNIQUE_PROCESS), ('app', ctypes.c_wchar * 256), ('svc', ctypes.c_wchar * 64),
+                        ('type', ctypes.c_int), ('status', wintypes.DWORD), ('session', wintypes.DWORD), ('restartable', wintypes.BOOL)]
+        session, key = wintypes.DWORD(), ctypes.create_unicode_buffer(64)
+        if rm.RmStartSession(ctypes.byref(session), 0, key):
+            return []
+        try:
+            items = [path] if isinstance(path, str) else list(path)
+            files = (ctypes.c_wchar_p * len(items))(*items)
+            if rm.RmRegisterResources(session, len(items), files, 0, None, 0, None):
+                return []
+            need, have, reasons = wintypes.UINT(), wintypes.UINT(0), wintypes.DWORD()
+            rm.RmGetList(session, ctypes.byref(need), ctypes.byref(have), None, ctypes.byref(reasons))
+            if not need.value:
+                return []
+            info = (RM_PROCESS_INFO * need.value)()
+            have = wintypes.UINT(need.value)
+            if rm.RmGetList(session, ctypes.byref(need), ctypes.byref(have), info, ctypes.byref(reasons)):
+                return []
+            return sorted({info[i].app for i in range(have.value) if info[i].app})
+        finally:
+            rm.RmEndSession(session)
+    except (OSError, AttributeError):
+        return []
+
+
+COMPRESSIBLE = {'.log', '.txt', '.csv', '.tsv', '.json', '.xml', '.sql', '.md', '.html', '.htm', '.svg', '.bmp', '.wav',
+                '.tif', '.tiff', '.psd', '.dump', '.trace', '.out', '.ldf', '.vmdk-log'}
+_compressible = {'at': 0, 'files': []}
+
+
+def compressible_files(home=None, min_size=20 * 2 ** 20, days=90):
+    """Large files of kinds that compress well (text, logs, uncompressed images and sound) not changed for
+    ``days`` days and not compressed yet — in your user folder, AppData and hidden folders left out (2.6.0 #15).
+    Cached 10 minutes."""
+    if home is None and time.time() - _compressible['at'] < 600:
+        return list(_compressible['files'])
+    root, limit, out = home or env('USERPROFILE'), time.time() - days * 86400, []
+    stack = [(root, 0)]
+    while stack:
+        d, depth = stack.pop()
+        try:
+            it = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in it:
+            try:
+                st = e.stat(follow_symlinks=False)
+                attrs = getattr(st, 'st_file_attributes', 0)
+                if attrs & REPARSE:
+                    continue
+                if e.is_dir(follow_symlinks=False):
+                    if depth < 8 and not e.name.startswith('.') and not (depth == 0 and e.name.lower() in ('appdata', 'onedrive')):
+                        stack.append((e.path, depth + 1))
+                elif (st.st_size >= min_size and st.st_mtime < limit and os.path.splitext(e.name)[1].lower() in COMPRESSIBLE
+                      and not attrs & (COMPRESSED | SPARSE | ONLINE_ONLY)):
+                    out.append(e.path)
+            except OSError:
+                pass
+    if home is None:
+        _compressible.update(at=time.time(), files=out)
+    return out
+
+
+def _tree_size(d):
+    total, stack = 0, [d]
+    while stack:
+        x = stack.pop()
+        try:
+            for e in os.scandir(x):
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        stack.append(e.path)
+                    else:
+                        total += e.stat(follow_symlinks=False).st_size
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    return total
+
+
+def git_repos(home=None, min_size=300 * 2 ** 20, max_depth=6):
+    """Git repositories in your user folder whose history (.git) takes ``min_size`` or more (2.6.0 #29)."""
+    root, out, stack = home or env('USERPROFILE'), [], [(home or env('USERPROFILE'), 0)]
+    while stack:
+        d, depth = stack.pop()
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        if any(e.name == '.git' and e.is_dir(follow_symlinks=False) for e in entries):
+            size = _tree_size(os.path.join(d, '.git'))
+            if size >= min_size:
+                out.append({'path': d, 'name': os.path.basename(d), 'size': size})
+            continue  # a repository's own folders are not searched for more
+        for e in entries:
+            try:
+                if (e.is_dir(follow_symlinks=False) and depth < max_depth and not e.name.startswith('.')
+                        and e.name not in DEV_DEPS and not (depth == 0 and e.name.lower() in ('appdata', 'onedrive'))):
+                    stack.append((e.path, depth + 1))
+            except OSError:
+                pass
+    return sorted(out, key=lambda x: -x['size'])
+
+
+def _files_under(d):
+    out = []
+    for root, dirs, files in os.walk(d):
+        dirs[:] = [x for x in dirs if not os.path.islink(os.path.join(root, x))
+                   and not getattr(os.path, 'isjunction', lambda _: False)(os.path.join(root, x))]
+        out += [os.path.join(root, f) for f in files]
+    return out
+
+
+def _sha256_file(p):
+    import hashlib
+    h = hashlib.sha256()
+    with open(p, 'rb') as fh:
+        for block in iter(lambda: fh.read(1 << 20), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def movable(d, size):
+    """Can be offered "Move to another drive" (2.6.0 #3): 1 GB or more, inside your user folder, not the user
+    folder itself, not AppData or its three main folders, not a junction."""
+    home = env('USERPROFILE')
+    if size < 2 ** 30 or not home or not inside(d, home):
+        return False
+    n = os.path.normcase(os.path.normpath(d))
+    fixed = {os.path.normcase(os.path.join(home, *p)) for p in ((), ('AppData',), ('AppData', 'Local'), ('AppData', 'Roaming'), ('AppData', 'LocalLow'))}
+    return n not in fixed and not getattr(os.path, 'isjunction', lambda _: False)(d)
+
+
+def move_folder(src, dest, progress=None):
+    """Move folder ``src`` to ``dest`` (on another drive) and leave a junction at ``src`` pointing there, so
+    programs find it as before (2.6.0 #3). Steps, each checked: rename ``src`` aside (fails at once if a
+    file in it is open — nothing has happened then); copy; compare every file's content (SHA-256); make the
+    junction; only then delete the set-aside original. On any failure the original is put back."""
+    import shutil
+    import subprocess
+    progress = progress or (lambda **k: None)
+    # A program may hold a file open with "share delete" (Chrome, Electron apps, VS Code…): Windows then allows
+    # the rename below, and the program would go on writing to the old copy. Ask who has files open first.
+    progress(step='check', done=0, total=0)
+    busy = lockers_many(_files_under(src))
+    if busy:
+        return {'ok': False, 'code': 'inUse', 'by': busy}
+    aside = src.rstrip('\\') + '.dtmove'
+    try:
+        os.rename(src, aside)
+    except OSError:
+        return {'ok': False, 'code': 'inUse', 'by': []}
+    try:
+        files = _files_under(aside)
+        progress(step='copy', done=0, total=len(files))
+        shutil.copytree(aside, dest, symlinks=True, dirs_exist_ok=False)
+        for i, f in enumerate(files):  # every file's content, compared
+            g = os.path.join(dest, os.path.relpath(f, aside))
+            if os.path.getsize(f) != os.path.getsize(g) or _sha256_file(f) != _sha256_file(g):
+                raise OSError('verify')
+            progress(step='verify', done=i + 1, total=len(files))
+        r = subprocess.run(['cmd', '/c', 'mklink', '/J', src, dest], capture_output=True, creationflags=0x08000000)
+        if r.returncode != 0 or not os.path.isdir(src):
+            raise OSError('junction')
+    except (OSError, shutil.Error) as e:
+        if os.path.isdir(src) and getattr(os.path, 'isjunction', lambda _: False)(src):
+            os.rmdir(src)
+        os.rename(aside, src)  # back as it was
+        shutil.rmtree(dest, ignore_errors=True)
+        return {'ok': False, 'code': 'moveFailed', 'why': str(e)[:200]}
+    shutil.rmtree(aside, ignore_errors=True)
+    if os.path.exists(aside):  # something could not be deleted after all: say where it is, never ignore it
+        return {'ok': True, 'src': src, 'dest': dest, 'files': len(files), 'leftover': aside}
+    return {'ok': True, 'src': src, 'dest': dest, 'files': len(files)}
+
+
+def move_back(src, dest, progress=None):
+    """Undo ``move_folder``: copy ``dest`` back, verify, replace the junction at ``src`` with the real folder,
+    then delete ``dest`` (2.6.0 #3)."""
+    import shutil
+    progress = progress or (lambda **k: None)
+    if not getattr(os.path, 'isjunction', lambda _: False)(src):
+        return {'ok': False, 'code': 'notMoved'}
+    tmp = src.rstrip('\\') + '.dtback'
+    try:
+        files = _files_under(dest)
+        progress(step='copy', done=0, total=len(files))
+        shutil.copytree(dest, tmp, symlinks=True)
+        for i, f in enumerate(files):
+            g = os.path.join(tmp, os.path.relpath(f, dest))
+            if _sha256_file(f) != _sha256_file(g):
+                raise OSError('verify')
+            progress(step='verify', done=i + 1, total=len(files))
+        os.rmdir(src)  # the junction only
+        os.rename(tmp, src)
+    except (OSError, shutil.Error) as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return {'ok': False, 'code': 'moveFailed', 'why': str(e)[:200]}
+    shutil.rmtree(dest, ignore_errors=True)
+    return {'ok': True}
+
+
+def recent_drafts(days=7, places_=None):
+    """Recovery copies and unsaved drafts Office and WPS keep after a crash or a close without saving, changed
+    in the last ``days`` days, newest first (2.6.0 #24). Only read; nothing is moved."""
+    ad, la = env('APPDATA'), env('LOCALAPPDATA')
+    places_ = places_ or [os.path.join(la, 'Microsoft', 'Office', 'UnsavedFiles'), os.path.join(ad, 'Microsoft', 'Word'),
+                          os.path.join(ad, 'Microsoft', 'Excel'), os.path.join(ad, 'Microsoft', 'PowerPoint'),
+                          os.path.join(ad, 'kingsoft', 'office6', 'backup'), os.path.join(ad, 'Kingsoft', 'office6', 'backup'),
+                          env('TEMP')]
+    limit, out, seen = time.time() - days * 86400, [], set()
+    for base in places_:
+        if not base or not os.path.isdir(base) or os.path.normcase(base) in seen:
+            continue
+        seen.add(os.path.normcase(base))
+        for d, dirs, files in os.walk(base):
+            if os.path.normcase(d).count(os.sep) - os.path.normcase(base).count(os.sep) >= 2:
+                dirs[:] = []
+            for f in files:
+                p = os.path.join(d, f)
+                low = f.lower()
+                ext = os.path.splitext(low)[1]
+                draft = is_draft(f) or 'unsavedfiles' in os.path.normcase(d) or 'backup' in os.path.normcase(d)
+                if not draft or ext in ('.tmp',) and not low.startswith(('~wr', '~$')) or low.startswith('~$'):
+                    continue  # "~$" files are only Office's lock files
+                try:
+                    st = os.stat(p)
+                except OSError:
+                    continue
+                if st.st_mtime >= limit and st.st_size > 0:
+                    out.append({'path': p, 'name': f, 'size': st.st_size, 'mtime': st.st_mtime, 'app': os.path.basename(base)})
+    return sorted(out, key=lambda x: -x['mtime'])
+
+
+KEEP_LOCALES = ('en', 'zh')  # the languages DeskTrace speaks; a program's own other languages are listed
+
+
+def language_packs(bases=None, min_size=20 * 2 ** 20):
+    """Programs (Electron, Chromium, CEF and the like) that carry a "locales" folder of language packs: the
+    space the packs other than English and Chinese take (2.6.0 #27). Listed only — deleting them breaks some
+    programs' updates, so DeskTrace offers no delete."""
+    k = known_dirs()
+    bases = bases or k['programs'] + [os.path.join(env('LOCALAPPDATA'), 'Programs')]
+    out = []
+    for base in bases:
+        for d, dirs, files in os.walk(base):
+            depth = os.path.relpath(d, base).count(os.sep)
+            if depth >= 4:
+                dirs[:] = []
+            if os.path.basename(d).lower() != 'locales':
+                continue
+            dirs[:] = []
+            other = 0
+            for f in files:
+                low = f.lower()
+                if low.endswith('.pak') and not low.startswith(KEEP_LOCALES):
+                    try:
+                        other += os.path.getsize(os.path.join(d, f))
+                    except OSError:
+                        pass
+            if other >= min_size:
+                out.append({'path': d, 'program': ' / '.join(os.path.relpath(d, base).split(os.sep)[:2]), 'size': other})
+    return sorted(out, key=lambda x: -x['size'])
+
+
+def _lp(p):
+    return p if p.startswith('\\\\?\\') or len(p) < 240 else '\\\\?\\' + p
+
+
+def bad_names(home=None, max_depth=12):
+    """Files and folders in your user folder that Explorer cannot open, rename or delete: names ending in a
+    space or a dot, and paths over 260 characters (2.6.0 #35). AppData and hidden folders are not searched."""
+    root, out, stack = home or env('USERPROFILE'), [], [(home or env('USERPROFILE'), 0)]
+    while stack:
+        d, depth = stack.pop()
+        try:
+            entries = list(os.scandir(_lp(d)))
+        except OSError:
+            continue
+        for e in entries:
+            p = os.path.join(d, e.name)
+            why = 'trailing' if e.name != e.name.rstrip(' .') else 'long' if len(p) >= 260 else None
+            if why:
+                out.append({'path': p, 'name': e.name, 'why': why, 'dir': e.is_dir(follow_symlinks=False)})
+            try:
+                if (e.is_dir(follow_symlinks=False) and depth < max_depth and not e.name.startswith('.')
+                        and not (depth == 0 and e.name.lower() in ('appdata', 'onedrive')) and not why == 'long'):
+                    stack.append((p, depth + 1))
+            except OSError:
+                pass
+    return out
+
+
+def fix_name(path):
+    """Rename a file or folder so Windows can handle it: trailing spaces and dots removed; a path that is too
+    long gets a shorter name (the start of the name and its extension). Never overwrites (2.6.0 #35)."""
+    folder, name = os.path.dirname(path), os.path.basename(path)
+    stem, ext = os.path.splitext(name.rstrip(' .'))
+    new = (stem or 'renamed') + ext
+    if len(os.path.join(folder, new)) >= 260:
+        room = max(8, 259 - len(folder) - 1 - len(ext))
+        new = stem[:room].rstrip(' .') + ext
+    target, n = os.path.join(folder, new), 2
+    raw = '\\\\?\\'  # always: without it Windows drops a trailing space or dot and cannot find the file
+    while os.path.exists(raw + target):
+        target, n = os.path.join(folder, f'{os.path.splitext(new)[0]} ({n}){os.path.splitext(new)[1]}'), n + 1
+    try:
+        os.rename(raw + path, raw + target)  # not abspath(): it would drop the trailing dot too
+    except OSError:
+        return {'ok': False, 'code': 'inUse'}
+    return {'ok': True, 'path': target}
+
+
+def old_installer_versions(folder=None):
+    """Setup files in Downloads that have a newer version of the same program next to them: the name with its
+    numbers taken out is the program ("app-setup-1.2.3.exe" ~ "app-setup-1.5.0.exe"); the newest stays (2.6.0 #33)."""
+    import re
+    folder = folder or os.path.join(env('USERPROFILE'), 'Downloads')
+    groups = {}
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                ext = os.path.splitext(e.name)[1].lower()
+                if ext in INSTALLERS and e.is_file(follow_symlinks=False):
+                    key = re.sub(r'[\s._()-]*\d+', '#', os.path.splitext(e.name)[0].lower()) + ext
+                    groups.setdefault(key, []).append((e.stat().st_mtime, e.path))
+    except OSError:
+        return []
+    return [p for g in groups.values() if len(g) > 1 for _, p in sorted(g)[:-1]]
 
 
 def _place_files(pl):
     """(path, size, mtime) of every file a place would clean (skipping links, junctions and fresh files)."""
     now, out = time.time(), []
+    if 'only' in pl:  # an explicit list of files (2.6.0)
+        for p in pl['only']:
+            try:
+                st = os.stat(p, follow_symlinks=False)
+                out.append((p, st.st_size, st.st_mtime))
+            except OSError:
+                pass
+        return out
     seen = set()
     for base in pl['paths']:
         if not base or not os.path.isdir(base) or os.path.normcase(base) in seen:
@@ -1186,6 +1866,15 @@ def clean(drive, place_id, recycle=None):
         if not any(inside(path, b) for b in bases):  # belt and braces: never outside the place itself
             continue
         try:
+            if pl['how'] == 'compress':  # Windows' transparent NTFS compression: the file stays as it is (2.6.0 #15)
+                import subprocess
+                r = subprocess.run(['compact', '/c', '/q', '/i', path], capture_output=True, creationflags=0x08000000)
+                after = compressed_size(path)
+                if r.returncode != 0 or after is None or after >= size:
+                    raise OSError
+                freed += max(0, (size + 4095) // 4096 * 4096 - after)  # what the disk gives back
+                cleaned += 1
+                continue
             if pl['how'] == 'recycle':
                 if recycle_problem(path) or not (recycle and recycle(path)):
                     raise OSError  # never "to the Recycle Bin" that would really be gone for good
@@ -1233,13 +1922,13 @@ def delete_file(path, scan=None, recycle=None, permanent=False):
         try:
             os.remove(path)
         except OSError:
-            return {'ok': False, 'code': 'inUse'}
+            return {'ok': False, 'code': 'inUse', 'by': lockers(path)}
     else:
         problem = recycle_problem(path)
         if problem:
             return {'ok': False, 'code': problem, 'size': size}
         if not (recycle and recycle(path)):
-            return {'ok': False, 'code': 'inUse'}
+            return {'ok': False, 'code': 'inUse', 'by': lockers(path)}
     if scan:
         scan.big = [b for b in scan.big if b[1] != path]
         heapq.heapify(scan.big)

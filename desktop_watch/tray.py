@@ -78,6 +78,7 @@ CALLBACK_MSG = WM_APP + 1
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO, NIF_SHOWTIP = 0x1, 0x2, 0x4, 0x10, 0x80
 NIIF_USER, NIIF_NOSOUND, NIIF_LARGE_ICON = 0x4, 0x10, 0x20
+WM_HOTKEY, HOTKEY_ID = 0x0312, 0xD7  # 2.6.0 #14
 MF_STRING, MF_GRAYED, MF_CHECKED, MF_POPUP, MF_SEPARATOR = 0x0, 0x1, 0x8, 0x10, 0x800
 TPM_RIGHTBUTTON, TPM_BOTTOMALIGN = 0x2, 0x20
 IMAGE_ICON, LR_LOADFROMFILE = 1, 0x10
@@ -98,6 +99,7 @@ class Tray:
         self.added = False
         self._taskbar_created = None  # set after the window exists; Windows sends messages before that
         self._icon = self._icon_paused = self._icon_large = None
+        self.state, self.state_icons, self._state_icon = None, {}, {}  # 2.6.0 #45: 'busy' / 'alert' -> .ico path
         # Stable menu ids (100, 101, … in ``commands`` order), so WM_COMMAND can be posted by tests too.
         self._ids = {100 + i: name for i, name in enumerate(commands)}
         self._last_click = 0.0
@@ -126,7 +128,11 @@ class Tray:
             self._icon = LoadImageW(None, self.icon_path, IMAGE_ICON, small, small, LR_LOADFROMFILE)
             self._icon_paused = LoadImageW(None, self.paused_icon_path, IMAGE_ICON, small, small, LR_LOADFROMFILE) or self._icon
             self._icon_large = LoadImageW(None, self.icon_path, IMAGE_ICON, large, large, LR_LOADFROMFILE)
+            for k, p in self.state_icons.items():
+                self._state_icon[k] = LoadImageW(None, str(p), IMAGE_ICON, small, small, LR_LOADFROMFILE)
             self.added = self._notify(NIM_ADD)
+            # 2.6.0 #14: Ctrl+Alt+Z anywhere -> the files just deleted or overwritten (if no other program took it)
+            self.hotkey = bool(ctypes.windll.user32.RegisterHotKey(self.hwnd, HOTKEY_ID, 0x0002 | 0x0001 | 0x4000, ord('Z')))
         finally:
             self.ready.set()
         msg = wintypes.MSG()
@@ -142,7 +148,7 @@ class Tray:
         d.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
         d.hWnd, d.uID, d.uFlags = self.hwnd, 1, flags
         d.uCallbackMessage = CALLBACK_MSG
-        d.hIcon = self._icon_paused if self.paused else self._icon
+        d.hIcon = self._icon_paused if self.paused else (self._state_icon.get(self.state) or self._icon)
         d.szTip = self.tooltip[:127]
         return d
 
@@ -161,6 +167,9 @@ class Tray:
                     self._show_menu()
                 elif event == NIN_BALLOONUSERCLICK:
                     self.on_command('open-notification')
+                return 0
+            if msg == WM_HOTKEY and wparam == HOTKEY_ID:
+                self.on_command('quick-restore')
                 return 0
             if msg == WM_COMMAND:
                 name = self._ids.get(wparam & 0xFFFF)
@@ -211,8 +220,10 @@ class Tray:
         """The menu id bound to ``name``."""
         return next((i for i, n in self._ids.items() if n == name), None)
 
-    def update(self, tooltip=None, paused=None):
+    def update(self, tooltip=None, paused=None, state=False):
         changed = False
+        if state is not False and state != self.state:  # None = still, 'busy' = green, 'alert' = red (2.6.0 #45)
+            self.state, changed = state, True
         if tooltip is not None and tooltip != self.tooltip:
             self.tooltip, changed = tooltip, True
         if paused is not None and paused != self.paused:

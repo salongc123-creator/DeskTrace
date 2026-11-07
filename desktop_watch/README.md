@@ -81,6 +81,7 @@ you choose which one to install; each includes everything before it. A version a
 | 2.4.1 | Review release (DeepSeek 2.4.0): guide restores inside itself; at most 4 scan workers with stop and fallback; backups state their format, "back up for older versions"; Clean up numbers marked as estimates; tidier restored-copy names |
 | 2.4.2 | Review release (Gemini 2.4.1): unplugged drives and unreadable folders never count as deleted; Find deleted files; restores are written in one step and leave files open elsewhere untouched, long paths work; SHA-256 version names (SHA-1 ones stay readable); drafts and recovery copies are never cleaned; Put them back stays available; plainer words |
 | 2.5.0 | Clean up: any listed file can be deleted with a plain explanation and a confirmation for risky ones; core Windows files are not listed; space map (two-level treemap) that jumps to the list; drive reading about twice as fast (shared work queue); finer kinds of file |
+| 2.6.0 | Gemini's 50-idea list in one version: what grew recently, mass-change guard, move a folder to another drive, move to a new PC, folder as of a time, similar photos, keep forever, batch-rename undo, draft rescue, many new Clean up kinds, hard-link duplicates, time slider / evolution / comparison report, Explorer and Ctrl+Alt+Z entry points, Windows tools and disk health |
 
 ## Releasing a new version
 1. Raise `APP_VERSION` in `server.py`. If stored data changes shape, raise `SCHEMA_VERSION` and add a

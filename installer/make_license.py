@@ -88,7 +88,7 @@ def install_public_key(key):
     src.write_text(text, 'utf-8')
 
 
-def make_license(version, min_version, notes, key, out=None, files=None, changelog=None):
+def make_license(version, min_version, notes, key, out=None, files=None, changelog=None, removed=None):
     files = {rel: Path(src).read_bytes() for rel, src in (files or app_files()).items()}
     # The packaged program must call itself by the license's version, or it would keep offering itself.
     files['server.py'], n = re.subn(rb"^APP_VERSION = '[^']*'", f"APP_VERSION = '{version}'".encode(), files['server.py'], flags=re.M)
@@ -99,6 +99,8 @@ def make_license(version, min_version, notes, key, out=None, files=None, changel
             'released': time.strftime('%Y-%m-%d'), 'notes': {k: v for k, v in notes.items() if v}, 'files': manifest}
     if changelog:
         meta['changelog'] = changelog
+    if removed:
+        meta['removed_features'] = removed  # feature -> version it was removed in (2.6.0)
     raw = json.dumps(meta, ensure_ascii=False, indent=1, sort_keys=True).encode('utf-8')
     out = Path(out or DIST / f'DeskTrace {version}{updates.EXT}')
     out.parent.mkdir(parents=True, exist_ok=True)

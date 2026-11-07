@@ -81,7 +81,8 @@ const basename = p => p.split(/[\\/]/).pop();
 const dirname = p => p.slice(0, Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/')));
 const loc = () => LANGS[LANG].locale;
 const num = n => Number(n || 0).toLocaleString(loc());
-const errText = r => r.code ? t('err.' + r.code, { size: fmtSize(r.size) }) : (r.error || t('err.generic'));
+const errText = r => (r.code ? t('err.' + r.code, { size: fmtSize(r.size) }) : (r.error || t('err.generic')))
+  + (r.by && r.by.length ? ' ' + t('err.lockedBy', { apps: r.by.join(', ') }) : '');  // who has it open (2.6.0 #19)
 
 function fmtSize(n) {
   if (n == null) return '—';
@@ -300,6 +301,12 @@ function connect() {
     else if (msg.type === 'update') onUpdate(msg.event);
     else if (msg.type === 'app-update') { S.update = msg.update; renderUpdateBadge(); if (!S.updating) showUpdate(); }
     else if (msg.type === 'status') { S.status = msg.status; renderStatus(); renderScope(); }
+    else if (msg.type === 'drive') {  // a removable drive was plugged in (2.6.0 #21)
+      const d = msg.drive; S.cleanDrives = null;
+      notifyAction(t('usb.text', { d: esc(d.drive.slice(0, 2)), label: esc(d.label || t('cl.removable')), free: fmtSize(d.free), total: fmtSize(d.total) }),
+        t('usb.look'), () => { S.cleanDrive = d.drive; S.clean = null; S.cleanFolder = null; setMode('clean'); loadClean(); }, 15000);
+    }
+    else if (msg.type === 'milestone') notify(t('ms.' + msg.kind, { n: msg.kind === 'freed' ? fmtSize(msg.step) : num(msg.step) }));  // 2.6.0 #50
     else if (msg.type === 'cleared') { S.sel = null; S.selGroup = null; S.byId.clear(); loadEvents(); loadStats(); if (!S.fileSel) renderWelcome(); }
   };
 }
@@ -390,7 +397,7 @@ function cardHTML(e) {
     <span class="rail"></span>${ficon(e.cat, e.ext)}
     <div class="cbody">
       <div class="crow1"><span class="fname" title="${esc(e.path)}">${hlName(e.name)}</span>${e.starred ? STAR_MARK() : ''}${kbadge(e.kind)}</div>
-      <div class="crow2">${whereHTML(e)}</div>
+      <div class="crow2">${whereHTML(e)}${e.kind === 'deleted' ? (e.has_prev_blob ? `<span class="rs-ok" title="${esc(t('rs.okWhy'))}">${t('rs.ok')}</span>` : `<span class="rs-no" title="${esc(t('rs.noWhy'))}">${t('rs.no')}</span>`) : ''}</div>
       <div class="crow3">${summaryHTML(e)}${tags}<span class="time" data-ts="${e.ts}" title="${esc(fmtFull(e.ts))}">${rel(e.ts)} · ${fmtTime(e.ts)}</span></div>
       ${F161 && e.note ? `<div class="cnote" title="${esc(e.note)}">${svg('note')}<span>${esc(e.note)}</span></div>` : ''}
     </div></div>`;
@@ -477,7 +484,8 @@ function renderList(prepended = false) {
       ? `<div class="empty-state">${ART}<h3>${t('notes.emptyTitle')}</h3><p>${t('notes.emptyText')}</p></div>`
       : `<div class="empty-state">${ART}<h3>${t(filtered ? 'list.noMatchTitle' : 'list.emptyTitle')}</h3><p>${t(filtered ? 'list.noMatchText' : 'list.emptyText')}</p></div>`;
   } else {
-    let html = S.goneOnly ? `<div class="gone-lead">${svg('restore')}<span>${t('del.lead')}</span></div>` : '', last = '';
+    let html = S.goneOnly ? `<div class="gone-lead">${svg('restore')}<span>${t('del.lead')}</span></div>` + draftsHTML() : '', last = '';
+    if (S.folder && !S.goneOnly) html += `<div class="gone-lead">${svg('clock')}<span>${t('fa.lead')}</span><button class="btn sm" id="folderAtBtn">${t('fa.btn')}…</button></div>`;
     // only deletions shown: offer to bring them all back at once (2.0.1)
     const back = S.kinds.size === 1 && S.kinds.has('deleted') ? S.events.filter(e => e.kind === 'deleted' && e.has_prev_blob) : [];
     if (back.length > 1) html += `<div class="restore-all"><span>${t('restoreAll.text', { n: num(back.length) })}</span>
@@ -571,9 +579,58 @@ async function showGuide(step = 1) {
 }
 
 /* ------------------------------------------------------------------ history backup (2.3.0) */
-async function startBackup(raw) {
+/* Similar photos (2.6.0 #32): a 64-bit difference hash per picture, computed here with a canvas. */
+function dhash(img) {
+  const c = document.createElement('canvas'); c.width = 9; c.height = 8;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, 9, 8);
+  const d = g.getImageData(0, 0, 9, 8).data, lum = i => d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  let bits = 0n;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) bits = (bits << 1n) | (lum((y * 9 + x) * 4) > lum((y * 9 + x + 1) * 4) ? 1n : 0n);
+  return bits;
+}
+const popcount = v => { let n = 0; while (v) { n += Number(v & 1n); v >>= 1n; } return n; };
+
+async function findSimilar() {
+  openModal(`<div class="m-head"><h3>${t('sim.title')}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+    <div class="m-body" id="simBody">${loadingHTML()}</div><div class="m-foot"><button class="btn primary" data-close>${t('btn.close')}</button></div>`, 'upd');
+  let all = [];
+  for (let off = 0; off < 3000; off += 500) {  // the list comes in pages of 500
+    const r = await get('/api/files', { cats: 'image', limit: 500, offset: off, sort: 'recent' }).catch(() => null);
+    const page = (r && r.files) || []; all = all.concat(page); if (page.length < 500) break;
+  }
+  const files = all.filter(f => /\.(jpe?g|png|webp|bmp|gif)$/i.test(f.path) && f.size > 20000);
+  const hashes = [];
+  for (let i = 0; i < files.length; i++) {
+    if (!$('#simBody')) return;  // closed
+    if (i % 20 === 0) $('#simBody').innerHTML = `<span class="spin"></span> ${t('sim.reading', { n: num(i), total: num(files.length) })}`;
+    const img = new Image(); img.decoding = 'async'; img.src = fileUrl(files[i].path);
+    try { await img.decode(); hashes.push({ f: files[i], h: dhash(img), w: img.naturalWidth * img.naturalHeight }); } catch { /* not readable */ }
+  }
+  const seen = new Set(), groups = [];
+  for (let i = 0; i < hashes.length; i++) {
+    if (seen.has(i)) continue;
+    const g = [hashes[i]];
+    for (let j = i + 1; j < hashes.length; j++) if (!seen.has(j) && popcount(hashes[i].h ^ hashes[j].h) <= 6) { g.push(hashes[j]); seen.add(j); }
+    if (g.length > 1) groups.push(g.sort((a, b) => b.w - a.w || b.f.size - a.f.size));
+  }
+  if (!$('#simBody')) return;
+  $('#simBody').innerHTML = groups.length ? `<p class="hint">${t('sim.lead', { n: groups.length })}</p>` + groups.slice(0, 60).map(g => `<div class="sim-group">${g.map((x, k) => `
+      <figure class="sim-item${k === 0 ? ' best' : ''}"><img loading="lazy" src="${fileUrl(x.f.path)}" alt=""><figcaption>${k === 0 ? `<b>${t('sim.best')}</b> · ` : ''}${esc(x.f.name)} · ${fmtSize(x.f.size)}</figcaption>
+        <div class="sim-acts"><button class="btn sm ghost" data-sim-reveal="${esc(x.f.path)}">${svg('folder')}</button>${k ? `<button class="btn sm danger" data-sim-del="${esc(x.f.path)}">${svg('trash')}</button>` : ''}</div></figure>`).join('')}</div>`).join('')
+    : `<div class="empty-state small">${t('sim.none', { n: num(hashes.length) })}</div>`;
+  $('#simBody').onclick = async ev => {
+    const rv = ev.target.closest('[data-sim-reveal]'), dl = ev.target.closest('[data-sim-del]');
+    if (rv) post('/api/reveal', { path: rv.dataset.simReveal });
+    if (dl) {
+      const res = await post('/api/clean/delete', { path: dl.dataset.simDel }).catch(() => ({}));
+      if (res.ok) { dl.closest('.sim-item').remove(); notify(t('cl.undoBar', { n: 1 })); } else notify(esc(errText(res)), true);
+    }
+  };
+}
+
+async function startBackup(raw, exportFile = false) {
   const p = await post('/api/pick-folder'); if (!p.path) return;
-  const r = await post('/api/backup', { dest: p.path, raw });
+  const r = await post(exportFile ? '/api/export' : '/api/backup', { dest: p.path, raw });  // 2.6.0 #44: one file for another PC
   if (!r.ok) { notify(esc(errText(r)), true); return; }
   const tick = async () => {
     const b = await get('/api/backup').catch(() => ({}));
@@ -617,8 +674,8 @@ async function showStorage() {
 // result. Risk-free items are ticked by default; the Recycle Bin and your own files never are. Caches and
 // temporary files are deleted for good; your files go to the Recycle Bin — and only where it really
 // keeps them. Windows, programs, synced cloud files and chat data are never offered for deletion.
-const CL_HOW = { delete: 'cl.how.delete', recycle: 'cl.how.recycle', empty: 'cl.how.empty', admin: 'cl.how.admin', inapp: 'cl.how.inapp', switch: 'cl.how.switch' };
-const CL_DEFAULT = new Set(['temp', 'wintemp', 'edge', 'chrome', 'firefox', 'crash', 'thumbs']);  // risk-free: ticked
+const CL_HOW = { delete: 'cl.how.delete', recycle: 'cl.how.recycle', empty: 'cl.how.empty', admin: 'cl.how.admin', inapp: 'cl.how.inapp', switch: 'cl.how.switch', compress: 'cl.how.compress' };
+const CL_DEFAULT = new Set(['temp', 'wintemp', 'edge', 'chrome', 'firefox', 'otherbrowsers', 'crash', 'thumbs']);  // risk-free: ticked
 let cleanTimer = null;
 async function loadClean(again = false) {
   clearTimeout(cleanTimer);
@@ -637,6 +694,16 @@ async function loadClean(again = false) {
   }
   S.clean = d;
   S.lastClean = await get('/api/clean/last').catch(() => null);
+  S.growth = await get('/api/clean/growth', { drive: d.drive, days: S.growthDays || 1 }).catch(() => null);
+  if (d.state !== 'scanning' && (!S.leftovers || S.leftovers.at !== d.cached_at)) {
+    S.leftovers = await get('/api/clean/leftovers').catch(() => null); if (S.leftovers) S.leftovers.at = d.cached_at;
+  }
+  if (!S.cloud) get('/api/clean/cloud').then(r => { S.cloud = r.items || []; }).catch(() => {});
+  if (!S.badNames) get('/api/clean/badnames').then(r => { S.badNames = r.items || []; }).catch(() => {});
+  if (!S.locales) get('/api/clean/locales').then(r => { S.locales = r.items || []; }).catch(() => {});
+  if (!S.gitRepos && d.state !== 'scanning') get('/api/clean/git').then(g => { S.gitRepos = g; if (S.mode === 'clean' && !S.cleanSel) renderCleanOverview(); }).catch(() => {});
+  if (!S.moves) get('/api/relocate').then(m => { S.moves = m.moves || []; }).catch(() => {});
+  if (!S.health) get('/api/clean/health').then(h => { S.health = h.disks || []; if (S.mode === 'clean' && !S.cleanSel) renderCleanOverview(); }).catch(() => {});
   if (d.items && S.cleanPickFor !== d.drive) {  // the default ticks, once per drive
     S.cleanPick = new Set(d.items.filter(x => CL_DEFAULT.has(x.id)).map(x => x.id));
     S.cleanPickFor = d.drive;
@@ -695,8 +762,10 @@ function renderClean() {
           ${x.how === 'admin' ? `<button type="button" class="btn sm" data-cl-win>${svg('open')}${t('cl.openWin')}</button>` : ''}
           ${x.how === 'empty' ? `<button type="button" class="btn sm danger" data-cl-empty>${svg('trash')}${t('cl.empty')}…</button>` : ''}
           ${x.how === 'inapp' ? `${x.exe ? `<button type="button" class="btn sm" data-cl-app="${x.id}">${svg('open')}${t('cl.openApp')}</button>` : ''}
+            <button type="button" class="btn sm" data-chat="${x.app}">${svg('trash')}${t('ch.btn')}…</button>
             <button type="button" class="btn sm ghost" data-cl-reveal="${esc(x.data)}">${svg('folder')}${t('cl.openData')}</button>` : ''}
           ${x.how === 'switch' ? `<button type="button" class="btn sm" data-cl-hiber="${x.on ? 'off' : 'on'}">${svg('power')}${t(x.on ? 'cl.hiberOff' : 'cl.hiberOn')}…</button>
+            ${x.on ? `<button type="button" class="btn sm" data-cl-hiber="reduced" title="${esc(t('cl.hiberReducedWhy'))}">${t('cl.hiberReduced')}…</button>` : ''}
             <button type="button" class="btn sm ghost" data-cl-power>${t('cl.powerOpts')}</button>` : ''}</div>
       </div></label>`;
   };
@@ -745,6 +814,132 @@ function squarify(items, x, y, w, h) {
   }
   return out;
 }
+/* Space Spikes Radar (2.6.0 #1): what grew between two full scans of this drive. */
+function badNamesHTML() {  // names Windows cannot handle (2.6.0 #35)
+  const L = S.badNames || []; if (!L.length) return '';
+  return `<div class="field"><label>${t('bn.title')} <span class="hint">· ${t('bn.hint')}</span></label>
+    ${L.slice(0, 12).map(x => `<div class="sp-frow"><span class="sp-folder">${svg(x.dir ? 'folder' : 'warn')}<span class="nm">${esc(x.name)}<span class="hint gr-path">${t('bn.' + x.why)} · ${esc(x.path)}</span></span></span>
+      <button class="btn sm" data-fix-name="${esc(x.path)}">${t('bn.fix')}</button></div>`).join('')}</div>`;
+}
+
+function localesHTML() {  // programs' language packs: listed only (2.6.0 #27)
+  const L = S.locales || []; if (!L.length) return '';
+  const tot = L.reduce((s, x) => s + x.size, 0);
+  return `<div class="field"><label>${t('lp.title', { size: fmtSize(tot) })} <span class="hint">· ${t('lp.hint')}</span></label>
+    ${L.slice(0, 8).map(x => `<div class="sp-frow"><span class="sp-folder">${svg('folder')}<span class="nm">${esc(x.program)}<span class="hint gr-path">${esc(x.path)}</span></span>
+      <b>${fmtSize(x.size)}</b></span><button class="btn sm ghost" data-cl-reveal="${esc(x.path)}" title="${esc(t('act.reveal'))}">${svg('open')}</button></div>`).join('')}</div>`;
+}
+
+function gitHTML() {  // large Git repositories (2.6.0 #29)
+  const G = S.gitRepos; if (!G || !G.items.length) return '';
+  return `<div class="field"><label>${t('git.title')} <span class="hint">· ${t('git.hint')}</span></label>
+    ${G.items.slice(0, 10).map(x => `<div class="sp-frow"><span class="sp-folder">${svg('code')}<span class="nm">${esc(x.name)}<span class="hint gr-path">${esc(x.path)}</span></span>
+      <b>${fmtSize(x.size)}</b></span><button class="btn sm ghost" data-cl-reveal="${esc(x.path)}" title="${esc(t('act.reveal'))}">${svg('open')}</button>
+      ${G.git ? `<button class="btn sm" data-git-gc="${esc(x.path)}" title="${esc(t('git.gcWhy'))}">${t('git.gc')}</button>` : ''}</div>`).join('')}
+    ${G.git ? '' : `<div class="hint">${t('git.noGit')}</div>`}</div>`;
+}
+
+function drawerHTML(parts) {  // the extra Clean up lists, folded into one drawer with a count (Gemini 2.6.0 Q-5)
+  const shown = parts.filter(Boolean); if (!shown.length) return '';
+  const more = (S.leftovers?.items || []).reduce((s, x) => s + x.size, 0) + (S.gitRepos?.items || []).reduce((s, x) => s + x.size, 0);
+  return `<details class="cl-drawer" ${S.drawerOpen ? 'open' : ''}>
+    <summary><b>${t('dw.title')}</b> <span class="dw-badge">${t('dw.count', { n: shown.length })}</span>${more ? ` <span class="hint">${t('dw.more', { size: fmtSize(more) })}</span>` : ''}</summary>
+    ${shown.join('')}</details>`;
+}
+
+function cloudHTML() {  // synced folders: on this PC vs online-only (2.6.0 #30)
+  const L = (S.cloud || []).filter(x => x.local_n || x.online_n); if (!L.length) return '';
+  return `<div class="field"><label>${t('cd.title')} <span class="hint">· ${t('cd.hint')}</span></label>
+    ${L.map(x => `<div class="sp-frow"><span class="sp-folder">${svg('globe')}<span class="nm">${esc(x.name)}<span class="hint gr-path">${t('cd.counts', { n: num(x.local_n), m: num(x.online_n) })} · ${esc(x.path)}</span></span>
+      <b>${fmtSize(x.local)}</b></span>${x.local ? `<button class="btn sm" data-cloud-free="${esc(x.path)}" title="${esc(t('cd.why'))}">${t('cd.free')}…</button>` : ''}</div>`).join('')}</div>`;
+}
+
+function movedHTML() {  // folders moved to another drive (2.6.0 #3)
+  const m = (S.moves || []); if (!m.length) return '';
+  return `<div class="field"><label>${t('mvf.listTitle')}</label>${m.map(x => `<div class="sp-frow"><span class="sp-folder">${svg('folder')}
+    <span class="nm">${esc(basename(x.src))}<span class="hint gr-path">${esc(x.src)} → ${esc(x.dest)}</span></span><b>${fmtSize(x.size)}</b></span>
+    <button class="btn sm" data-cl-moveback="${esc(x.src)}">${t('mvf.back')}…</button></div>`).join('')}</div>`;
+}
+
+async function folderMoveRun(start) {  // start a move (or move back) and follow it (2.6.0 #3)
+  const r = await start().catch(() => ({ ok: false }));
+  if (!r.ok) { closeModal(); notify(esc(errText(r)), true); return; }
+  const tick = async () => {
+    const m = await get('/api/relocate').catch(() => ({}));
+    if (m.state === 'running') {
+      const el = $('#mvfState');
+      if (el) el.innerHTML = `<span class="spin"></span> ${t('mvf.step.' + (m.step || 'start'), { n: num(m.done || 0), total: num(m.total || 0) })}`;
+      return setTimeout(tick, 600);
+    }
+    closeModal();
+    S.moves = m.moves || [];
+    const res = m.result || {};
+    if (m.state === 'done') notify(res.leftover ? t('mvf.leftover', { path: `<span class="mono">${esc(res.leftover)}</span>` }) : t('mvf.done'), !!res.leftover);
+    else if (res.by && res.by.length) notify(t('mvf.busy', { apps: esc(res.by.join(', ')) }), true);
+    else notify(esc(t('mvf.failed', { why: res.why || res.code || '' })), true);
+    loadClean(true);
+  };
+  tick();
+}
+
+function folderMoveDialog(path) {
+  const f = (S.clean?.folders || []).find(x => x.path === path); if (!f) return;
+  const drives = (S.cleanDrives || []).filter(x => x.drive.slice(0, 2) !== path.slice(0, 2) && !x.removable && x.free > f.size * 1.1);
+  openModal(`<div class="m-head"><h3>${t('mvf.title', { name: esc(f.name) })}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+    <div class="m-body"><p>${t('mvf.text', { size: fmtSize(f.size) })}</p>
+      ${drives.length ? `<select class="sel-sm" id="mvfDrive">${drives.map(x => `<option value="${esc(x.drive)}">${esc(x.drive.slice(0, 2))} ${esc(x.label || '')} · ${t('cl.free', { free: fmtSize(x.free), total: fmtSize(x.total) })}</option>`).join('')}</select>` : `<p class="hint">${t('mvf.noDrive')}</p>`}
+      <label class="chk"><input type="checkbox" id="mvfSure"> ${t('mvf.sure')}</label><div class="hint" id="mvfState"></div></div>
+    <div class="m-foot"><button class="btn" data-close>${t('btn.cancel')}</button><button class="btn primary" id="mvfGo" disabled>${t('mvf.go')}</button></div>`, 'sm');
+  $('#mvfSure').onchange = e => { $('#mvfGo').disabled = !e.target.checked || !drives.length; };
+  $('#mvfGo').onclick = () => { $('#mvfGo').disabled = true; folderMoveRun(() => post('/api/relocate', { path, drive: $('#mvfDrive').value })); };
+}
+
+async function chatDialog(app, days = 90) {  // a chat app's old received media, by kind (2.6.0 #7)
+  openModal(`<div class="m-head"><h3>${t('ch.title', { app: t('cl.app.' + app) })}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+    <div class="m-body" id="chBody">${loadingHTML()}</div><div class="m-foot"><button class="btn" data-close>${t('btn.cancel')}</button>
+    <button class="btn danger" id="chGo" disabled>${svg('trash')}${t('cl.recycleFile')}</button></div>`, 'sm');
+  const r = await get('/api/chat-media', { app, days }).catch(() => null);
+  if (!r || !r.ok || !$('#chBody')) return;
+  const kinds = ['picture', 'video', 'file', 'cache'];
+  $('#chBody').innerHTML = `<p>${t('ch.text')}</p>
+    <label>${t('ch.older')} <select class="sel-sm" id="chDays">${[30, 90, 180, 365].map(n => `<option value="${n}" ${n === days ? 'selected' : ''}>${t('ch.days', { n })}</option>`).join('')}</select></label>
+    ${kinds.map(k => `<label class="chk"><input type="checkbox" data-kind-pick="${k}" ${k === 'cache' || k === 'video' ? 'checked' : ''} ${r.kinds[k].n ? '' : 'disabled'}>
+      ${t('ch.k.' + k)} — ${fmtSize(r.kinds[k].size)} (${num(r.kinds[k].n)})</label>`).join('')}
+    <p class="hint">${t('ch.never')}</p>`;
+  const upd = () => { $('#chGo').disabled = !$$('[data-kind-pick]:checked').length; };
+  $$('[data-kind-pick]').forEach(x => x.onchange = upd); upd();
+  $('#chDays').onchange = e => chatDialog(app, +e.target.value);
+  $('#chGo').onclick = async () => {
+    $('#chGo').disabled = true; $('#chGo').innerHTML = `<span class="spin"></span>`;
+    const res = await post('/api/chat-media-clean', { app, days: +$('#chDays').value, kinds: $$('[data-kind-pick]:checked').map(x => x.dataset.kindPick) }).catch(() => ({ ok: false }));
+    closeModal();
+    if (res.ok) notify(t('ch.done', { n: num(res.moved), size: fmtSize(res.freed) })); else notify(esc(errText(res)), true);
+    loadClean();
+  };
+}
+
+function leftoversHTML() {  // possible leftovers of uninstalled programs (2.6.0 #2)
+  const L = S.leftovers; if (!L || !L.ready || !L.items.length) return '';
+  return `<div class="field"><label>${t('lo.title')} <span class="hint">· ${t('lo.hint')}</span></label>
+    ${L.items.slice(0, 12).map(x => `<div class="sp-frow"><span class="sp-folder">${svg('folder')}<span class="nm">${esc(x.name)}<span class="hint gr-path">${esc(x.where)} · ${esc(x.path)}</span></span>
+      <b>${fmtSize(x.size)}</b></span><button class="btn sm" data-cl-reveal="${esc(x.path)}">${svg('open')}${t('lo.open')}</button>
+      <button class="btn sm danger" data-lo-del="${esc(x.path)}">${svg('trash')}${t('lo.del')}…</button></div>`).join('')}</div>`;
+}
+
+function growthHTML() {
+  const g = S.growth; if (!g || !g.ok) return '';
+  const seg = `<span class="seg small" id="growthSeg">${[1, 7].map(n => `<button data-growth="${n}" class="${(S.growthDays || 1) === n ? 'on' : ''}">${t('gr.days' + n)}</button>`).join('')}</span>`;
+  if (!g.ready) return `<div class="field gr-box"><label>${t('gr.title')}</label><div class="hint">${t('gr.notReady', { n: g.scans || 0 })}</div></div>`;
+  const max = Math.max(1, ...g.items.map(x => x.grew));
+  const span = `${fmtFull(g.from)} → ${fmtFull(g.to)}`;
+  const rows = g.items.map(x => `<div class="sp-frow gr-row"><button class="sp-folder" data-cl-folder="${esc(x.path)}" title="${esc(x.path)}">
+      ${svg('folder')}<span class="nm">${esc(x.name)}<span class="hint gr-path">${esc(x.path)}</span></span><span class="bar"><i style="width:${(x.grew / max * 100).toFixed(1)}%"></i></span>
+      <b class="gr-plus">+${fmtSize(x.grew)}<span class="pct">${x.new ? t('gr.newFolder') : t('gr.was', { size: fmtSize(x.was) })}</span></b></button></div>`).join('');
+  return `<div class="field gr-box"><label>${t('gr.title')} ${seg}</label>
+    <div class="hint">${t(g.total >= 0 ? 'gr.lead' : 'gr.leadShrunk', { span, total: fmtSize(Math.abs(g.total)) })}</div>
+    ${rows || `<div class="hint">${t('gr.none')}</div>`}</div>`;
+}
+
 function spaceGridHTML(d) {
   setTimeout(gridPendingJump, 0);  // after a click on a deeper block: show it once its folder is open
   const folders = (d.folders || []).slice(0, 16).filter(f => f.size > 0);
@@ -829,17 +1024,26 @@ function renderCleanOverview() {
         ${inRoot && cleanable ? `<div class="cl-gain">${svg('check')} ${t('cl.gain2', { now: fmtSize(tot.now), later: fmtSize(tot.later + (bin ? bin.size : 0)) })}</div>` : ''}</div></div>
     <div class="tab-body">
       ${!scanned ? `<div class="empty-state small"><span class="spin"></span> ${t('cl.scanning', { n: num(d.files || 0), size: fmtSize(d.bytes || 0) })}</div>` : `
+      ${growthHTML()}
       ${spaceGridHTML(d)}
       <div class="field"><label>${t('cl.folders')} <span class="hint">· ${t('cl.drillHint')}</span></label>
         ${(d.folders || []).slice(0, 16).map(f => `<div class="sp-frow"><button class="sp-folder" data-cl-folder="${esc(f.path)}">
           ${svg('folder')}<span class="nm">${esc(f.name)}${f.shared ? ` <span class="cl-usage inline"><span>${t('cl.sharedFolder', { size: fmtSize(f.shared) })}</span></span>` : ''}</span><span class="bar"><i style="width:${(f.size / fMax * 100).toFixed(1)}%"></i></span>
           <b>${fmtSize(f.size)}<span class="pct">${d.size ? Math.round(f.size / d.size * 100) : 0}%</span></b></button>
+          ${f.movable ? `<button class="btn sm ghost" data-cl-move="${esc(f.path)}" title="${esc(t('mvf.why'))}">${t('mvf.btn')}</button>` : ''}
           <button class="btn sm ghost" data-cl-reveal="${esc(f.path)}" title="${esc(t('act.reveal'))}">${svg('open')}</button></div>`).join('') || `<div class="hint">${t('sp.noSub')}</div>`}</div>
       ${!inRoot && (d.here || []).length ? `<div class="field"><label>${t('cl.here')}</label>${d.here.slice(0, 20).map(f => `<div class="sp-row cl-here" data-cl-file="${esc(f.path)}">
           ${ficon(f.cat, f.ext)}<span class="nm">${esc(f.name)}</span>${levelBadge(f)}<b>${fmtSize(f.size)}</b></div>`).join('')}</div>` : ''}
       ${inRoot ? `<div class="field"><label>${t('cl.types')}</label><div class="ins-cats">${(d.types || []).map(x => `<div class="ins-cat"><span class="nm mono" title="${x.ext === '(none)' ? esc(t('cl.noExtWhy')) : ''}">${x.ext === '(none)' ? t('cl.noExt') : esc(x.ext)}</span>
           <span class="bar"><i style="width:${(x.size / tMax * 100).toFixed(1)}%"></i></span><b>${fmtSize(x.size)}</b></div>`).join('')}
           ${d.other_types ? `<div class="ins-cat"><span class="nm">${t('cl.other')}</span><span class="bar"><i style="width:${(d.other_types / tMax * 100).toFixed(1)}%"></i></span><b>${fmtSize(d.other_types)}</b></div>` : ''}</div></div>` : ''}
+      ${movedHTML()}
+      ${drawerHTML([cloudHTML(), leftoversHTML(), gitHTML(), localesHTML(), badNamesHTML()])}
+      <div class="field"><label>${t('wt.title')}</label><div class="wt-row">
+        <button type="button" class="btn sm" data-cl-tool="cleanmgr" title="${esc(t('wt.cleanmgrWhy'))}">${svg('shield')}${t('wt.cleanmgr')}</button>
+        <button type="button" class="btn sm" data-cl-tool="optimize" title="${esc(t('wt.optimizeWhy'))}">${svg('chart')}${t('wt.optimize')}</button>
+        ${(S.health || []).map(x => `<span class="dk-health ${x.health === 'Healthy' ? 'ok' : 'bad'}" title="${esc(t('dk.why'))}">${svg(x.health === 'Healthy' ? 'check' : 'warn')}${esc(x.name)} · ${esc(x.media)} · ${t(x.health === 'Healthy' ? 'dk.ok' : 'dk.bad', { s: esc(x.health) })}</span>`).join('')}
+        <button type="button" class="btn sm" data-cl-tool="index" title="${esc(t('wt.indexWhy'))}">${svg('info')}${t('wt.index')}</button></div></div>
       ${d.quick_folders && d.quick_folders.length ? `<div class="hint">${t('cl.quickNote')}</div>` : ''}
       ${d.sharing ? `<div class="hint"><span class="spin"></span> ${t('cl.sharing')}</div>` : ''}
       ${d.tiny ? `<div class="hint">${t('cl.tinyNote', { n: num(d.tiny), size: fmtSize(d.tiny_bytes) })}</div>` : ''}
@@ -881,7 +1085,7 @@ function cleanConfirm() {
   const tot = clTotals(picked);
   openModal(`<div class="m-head"><h3>${t('cl.confirmTitle')}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
     <div class="m-body"><table class="kv-table cl-sum">${picked.map(x => `<tr><td>${t('cl.item.' + x.id)}</td><td class="num">${fmtSize(x.size)}</td>
-      <td>${x.how === 'delete' ? (x.level === 'safe' ? `<span class="cl-how h-gone">${t('cl.how.gone')}</span>` : `<span class="cl-how h-delete">${t('cl.irreversible')}</span>`) : `<span class="cl-how h-recycle">${t('cl.how.recycle')}</span>`}</td></tr>`).join('')}</table>
+      <td>${x.how === 'compress' ? `<span class="cl-how h-recycle">${t('cl.how.compress')}</span>` : x.how === 'delete' ? (x.level === 'safe' ? `<span class="cl-how h-gone">${t('cl.how.gone')}</span>` : `<span class="cl-how h-delete">${t('cl.irreversible')}</span>`) : `<span class="cl-how h-recycle">${t('cl.how.recycle')}</span>`}</td></tr>`).join('')}</table>
       <p class="cl-tot"><b>${t('cl.freeNow', { size: fmtSize(tot.now) })}</b>${tot.later ? ` · ${t('cl.freeLater', { size: fmtSize(tot.later) })}` : ''}</p>
       <p class="hint">${t('cl.confirmHint')}</p></div>
     <div class="m-foot"><button class="btn" data-close>${t('btn.cancel')}</button><button class="btn primary" id="clStart">${svg('trash')}${t('cl.start')}</button></div>`, 'sm');
@@ -975,7 +1179,7 @@ async function deleteBigFile(path, permanent = false) {
 }
 
 async function cleanAct(ev) {
-  const b = ev.target.closest('[data-cl-app],[data-cl-hiber],[data-cl-power],[data-cl-drive],[data-cl-pick],[data-cl-go],[data-cl-empty],[data-cl-win],[data-cl-rescan],[data-cl-stop],[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back],[data-cl-jump]');
+  const b = ev.target.closest('[data-cl-app],[data-cl-hiber],[data-cl-power],[data-cl-drive],[data-cl-pick],[data-cl-go],[data-cl-empty],[data-cl-win],[data-cl-rescan],[data-cl-stop],[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back],[data-cl-jump],[data-growth],[data-cl-tool],[data-lo-del],[data-git-gc],[data-cl-move],[data-cl-moveback],[data-chat],[data-fix-name],[data-cloud-free]');
   if (!b) return false;
   const ds = b.dataset;
   if (ds.clPick) {  // a checkbox: keep the browser's own toggle, just remember it
@@ -991,9 +1195,51 @@ async function cleanAct(ev) {
     if (!gridJump(ds.clJump) && ds.clParent) { S.gridJump = ds.clJump; S.cleanFolder = ds.clParent; loadClean(); }  // a deeper block: open its folder first
   }
   else if (ds.clBack != null) lastCleanUndo();
+  else if (ds.gitGc) {
+    b.disabled = true; b.innerHTML = `<span class="spin"></span> ${t('git.running')}`;
+    const r = await post('/api/clean/git-gc', { path: ds.gitGc }).catch(() => ({ ok: false }));
+    notify(r.ok ? t('git.done', { size: fmtSize(r.freed || 0) }) : t('git.failed'), !r.ok);
+    S.gitRepos = null; loadClean();
+  }
+  else if (ds.clMove) folderMoveDialog(ds.clMove);
+  else if (ds.clMoveback) {
+    if (await confirmBox(t('mvf.backTitle'), esc(t('mvf.backText')), t('mvf.back'), false)) {
+      openModal(`<div class="m-head"><h3>${t('mvf.back')}</h3></div><div class="m-body"><div class="hint" id="mvfState"></div></div>`, 'sm');
+      folderMoveRun(() => post('/api/relocate-back', { path: ds.clMoveback }));
+    }
+  }
+  else if (ds.chat) chatDialog(ds.chat);
+  else if (ds.cloudFree) {
+    if (!await confirmBox(t('cd.askTitle'), esc(t('cd.askText')), t('cd.free'), false)) return true;
+    const r = await post('/api/clean/cloud-free', { path: ds.cloudFree }).catch(() => ({ ok: false }));
+    notify(r.ok ? t('cd.done') : esc(errText(r)), !r.ok); S.cloud = null; loadClean();
+  }
+  else if (ds.fixName) {
+    const r = await post('/api/clean/fix-name', { path: ds.fixName }).catch(() => ({ ok: false }));
+    if (!r.ok) { notify(esc(errText(r)), true); return true; }
+    S.badNames = (S.badNames || []).filter(x => x.path !== ds.fixName);
+    notify(t('bn.done', { path: `<span class="mono">${esc(r.path)}</span>` })); renderCleanOverview();
+  }
+  else if (ds.loDel) {
+    const x = (S.leftovers?.items || []).find(i => i.path === ds.loDel); if (!x) return true;
+    openModal(`<div class="m-head"><h3>${t('lo.askTitle', { name: esc(x.name) })}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+      <div class="m-body"><p>${t('lo.askText', { path: `<span class="mono">${esc(x.path)}</span>`, size: fmtSize(x.size) })}</p>
+        <label class="chk"><input type="checkbox" id="loSure"> ${t('cl.iKnow')}</label></div>
+      <div class="m-foot"><button class="btn primary" data-close>${t('btn.cancel')}</button><button class="btn danger" id="loGo" disabled>${svg('trash')}${t('cl.recycleFile')}</button></div>`, 'sm');
+    $('#loSure').onchange = e => { $('#loGo').disabled = !e.target.checked; };
+    $('#loGo').onclick = async () => {
+      closeModal();
+      const r = await post('/api/clean/leftover-delete', { path: x.path }).catch(() => ({}));
+      if (!r.ok) { notify(esc(errText(r)), true); return; }
+      S.leftovers.items = S.leftovers.items.filter(i => i.path !== x.path);
+      notify(t('lo.done', { name: esc(x.name), size: fmtSize(x.size) })); loadClean();
+    };
+  }
+  else if (ds.growth) { S.growthDays = +ds.growth; S.growth = await get('/api/clean/growth', { drive: S.cleanDrive, days: S.growthDays }).catch(() => null); renderCleanOverview(); }
   else if (ds.clApp) post('/api/clean/app', { id: ds.clApp });
   else if (ds.clPower != null) post('/api/clean/power');
-  else if (ds.clHiber) hiberConfirm(ds.clHiber === 'on');
+  else if (ds.clTool) post('/api/clean/wintool', { tool: ds.clTool });
+  else if (ds.clHiber) (ds.clHiber === 'reduced' ? post('/api/clean/hibernate', { reduced: true }).then(() => notify(t('cl.hiberAsked'))) : hiberConfirm(ds.clHiber === 'on'));
   else if (ds.clEmpty != null) emptyBinConfirm();
   else if (ds.clRescan != null) loadClean(ds.clRescan || true);
   else if (ds.clStop != null) { await post('/api/clean/stop', { drive: S.cleanDrive }); setTimeout(loadClean, 600); }
@@ -1155,6 +1401,7 @@ function renderDupDetail(g) {
         <div class="d-meta"><span>${t('dup.title', { n: g.count })}</span><span class="dot"></span><span>${t('dup.each', { size: fmtSize(g.size) })}</span><span class="dot"></span><b class="dup-free">${t('dup.free', { size: fmtSize(g.wasted) })}</b></div></div>
       <button class="icon-btn d-close" id="dClose" title="${esc(t('btn.close'))}">${svg('x')}</button></div>
     <div class="d-actions"><button class="btn sm primary" data-dup-act="keep-newest">${svg('trash')}${t('dup.keepNewest', { n: g.count - 1 })}</button>
+      <button class="btn sm" data-dup-act="link" title="${esc(t('hl.why'))}">${svg('copy')}${t('hl.btn')}</button>
       <button class="btn sm" data-dup-act="not-dup" title="${esc(t('hide.dupHint'))}">${svg('eyeoff')}${t('hide.dup')}</button></div>
     <div class="tab-body">${noteHTML(t('dup.how'))}
       ${g.files.map((f, i) => `<div class="dup-row">${ficon(g.cat, g.ext)}
@@ -1177,6 +1424,15 @@ async function dupAct(name, path) {
     const hash = S.dupSel; if (!hash) return;
     S.dupSel = null; renderWelcome();
     return hideItem('dup_hidden', hash, true);
+  }
+  if (name === 'link') {  // keep every copy where it is, but store the content once (2.6.0 #13)
+    const g = dupGroups().find(x => x.hash === S.dupSel); if (!g) return;
+    if (!await confirmBox(t('hl.title', { n: g.files.length }), esc(t('hl.text')), t('hl.go'), false)) return;
+    const r = await post('/api/dup-link', { paths: g.files.map(f => f.path) }).catch(() => ({ ok: false }));
+    if (!r.ok) { notify(esc(errText(r)), true); return; }
+    notify(t('hl.done', { n: r.linked, size: fmtSize(r.freed || 0), m: (r.skipped || []).length }), !!(r.skipped || []).length);
+    setTimeout(loadDups, 800);
+    return;
   }
   if (name === 'keep-newest') {  // keep the newest copy, recycle the rest (1.7.1)
     const g = dupGroups().find(x => x.hash === S.dupSel); if (!g) return;
@@ -1298,11 +1554,53 @@ function renderWarnings() {  // history may be incomplete: never silent (2.3.0, 
   const away = (S.status && S.status.offline_roots) || [];
   const act = { lowdisk: `<button class="btn sm" data-warn-go="clean">${t('warn.goClean')}</button>`,
     integrity: `<button class="btn sm" data-warn-go="backup">${t('warn.goBackup')}</button>`,
+    mass: `<button class="btn sm danger" data-mass="restore">${t('mass.restore')}…</button><button class="btn sm ghost" data-mass="dismiss">${t('mass.dismiss')}</button>`,
     rootgone: away.map(r => `<button class="btn sm ghost" data-root-gone="${esc(r)}">${t('warn.rootgoneBtn')}</button>`).join('') };
   const vars = { dirs: away.map(r => `<span class="mono">${esc(r)}</span>`).join('、') };
   $('#warnBar').hidden = !w.length;
   $('#warnBar').innerHTML = w.map(k => `<div class="warn-row">${svg('warn')}<span><b>${t('warn.' + k)}</b> ${t('warn.' + k + 'Why', vars)}</span>${act[k] || ''}</div>`).join('');
   $$('#warnBar [data-root-gone]').forEach(b => b.onclick = () => rootGoneConfirm(b.dataset.rootGone));
+  $('#warnBar').classList.toggle('danger', w.includes('mass'));
+  $$('#warnBar [data-mass]').forEach(b => b.onclick = () => b.dataset.mass === 'dismiss' ? post('/api/mass-dismiss').then(refreshStatus) : massConfirm());
+}
+
+function refreshStatus() { return get('/api/stats').then(st => { S.stats = st; S.status = st.status; renderStatus(); }).catch(() => {}); }
+
+function massConfirm() {  // many files changed at once: put them all back as they were before (2.6.0 #6)
+  const m = S.status && S.status.mass; if (!m) return;
+  openModal(`<div class="m-head"><h3>${t('mass.title', { n: num(m.n) })}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+    <div class="m-body"><p>${t('mass.text', { from: esc(fmtFull(m.since)), to: esc(fmtTime(m.until)) })}</p></div>
+    <div class="m-foot"><button class="btn" data-close>${t('btn.cancel')}</button><button class="btn danger" id="massGo">${svg('restore')}${t('mass.go')}</button></div>`, 'sm');
+  $('#massGo').onclick = async () => {
+    $('#massGo').disabled = true;
+    const r = await post('/api/mass-restore', { since: m.since, until: m.until, lang: LANG }).catch(() => ({ restored: 0, failed: 0 }));
+    closeModal();
+    notify(t('mass.done', { n: num(r.restored || 0), m: num(r.failed || 0) }), !!r.failed);
+    refreshStatus(); loadEvents();
+  };
+}
+
+function draftsHTML() {  // unsaved drafts of Office / WPS (2.6.0 #24)
+  const d = S.drafts || []; if (!d.length) return '';
+  return `<div class="gone-lead drafts"><div style="flex:1"><b>${t('dr.title')}</b><div class="hint">${t('dr.lead')}</div>
+    ${d.slice(0, 8).map(x => `<div class="dr-row"><span class="mono">${esc(x.name)}</span><span class="hint">${esc(fmtFull(x.mtime))} · ${fmtSize(x.size)}</span>
+      <button class="btn sm" data-draft-save="${esc(x.path)}">${t('dr.save')}</button></div>`).join('')}</div></div>`;
+}
+
+function folderAtDialog() {  // the folder as it was at a time, written as a copy (2.6.0 #31)
+  const pad = n => String(n).padStart(2, '0'), d = new Date(Date.now() - 3600 * 1000);
+  const v = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  openModal(`<div class="m-head"><h3>${t('fa.title', { name: esc(basename(S.folder)) })}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+    <div class="m-body"><p>${t('fa.text')}</p><input type="datetime-local" id="faWhen" value="${v}"></div>
+    <div class="m-foot"><button class="btn" data-close>${t('btn.cancel')}</button><button class="btn primary" id="faGo">${svg('restore')}${t('fa.go')}</button></div>`, 'sm');
+  $('#faGo').onclick = async () => {
+    const ts = new Date($('#faWhen').value).getTime() / 1000; if (!ts) return;
+    $('#faGo').disabled = true;
+    const r = await post('/api/folder-at', { folder: S.folder, ts, lang: LANG }).catch(() => ({ ok: false }));
+    closeModal();
+    if (!r.ok) { notify(esc(errText(r)), true); return; }
+    notifyAction(t('fa.done', { n: num(r.files), m: num(r.missing), path: `<span class="mono">${esc(r.path)}</span>` }), t('act.reveal'), () => post('/api/clean/reveal', { path: r.path }), 15000);
+  };
 }
 
 function rootGoneConfirm(root) {  // only the user can tell "deleted" from "unplugged" (2.4.2)
@@ -1408,6 +1706,7 @@ function renderGroupDetail(g) {
     <div class="d-actions">
       ${restorable.length ? `<button class="btn sm primary" data-gact="restore-all">${svg('restore')}${t('g.restoreAll', { n: restorable.length })}</button>` : ''}
       ${g.items.some(e => e.kind === 'deleted' ? e.has_prev_blob : e.has_blob) ? `<button class="btn sm" data-gact="restore-to">${svg('restore')}${t('g.restoreTo')}</button>` : ''}
+      ${g.items.filter(e => e.kind === 'renamed').length > 1 ? `<button class="btn sm" data-gact="rename-back">${svg('restore')}${t('rb.btn', { n: g.items.filter(e => e.kind === 'renamed').length })}</button>` : ''}
       <button class="btn sm" data-gact="reveal">${svg('folder')}${t('act.reveal')}</button>
     </div>
     <div class="tabs"><button class="tab on">${t('g.files')} <span class="n">${g.items.length}</span></button></div>
@@ -1420,6 +1719,18 @@ function renderGroupDetail(g) {
 
 async function groupAct(name) {
   const g = findGroup(S.selGroup); if (!g) return;
+  if (name === 'rename-back') {  // a batch rename gone wrong: every file back to its old name (2.6.0 #40)
+    const ids = g.items.filter(e => e.kind === 'renamed').map(e => e.id);
+    openModal(`<div class="m-head"><h3>${t('rb.title', { n: ids.length })}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+      <div class="m-body"><p>${t('rb.text')}</p></div>
+      <div class="m-foot"><button class="btn" data-close>${t('btn.cancel')}</button><button class="btn primary" id="rbGo">${svg('restore')}${t('rb.go')}</button></div>`, 'sm');
+    $('#rbGo').onclick = async () => {
+      closeModal();
+      const r = await post('/api/rename-back', { ids }).catch(() => ({ done: 0, skipped: [] }));
+      notify(t(r.skipped && r.skipped.length ? 'rb.partly' : 'rb.done', { n: r.done || 0, m: (r.skipped || []).length }), !!(r.skipped && r.skipped.length));
+    };
+    return;
+  }
   if (name === 'reveal') {
     const r = await post('/api/reveal', { path: commonDir(g.items) });
     if (!r.ok) notify(esc(errText(r)), true);
@@ -1505,7 +1816,8 @@ function renderWelcome() {
 }
 
 const starBtnHTML = e => `<button class="btn sm star-btn${e.starred ? ' on' : ''}" data-act="star" aria-pressed="${!!e.starred}"
-  title="${esc(t('star.title'))}">${svg('star')}${t(e.starred ? 'star.remove' : 'star.add')}</button>`;
+  title="${esc(t('star.title'))}">${svg('star')}${t(e.starred ? 'star.remove' : 'star.add')}</button>`
+  + `<button class="btn sm pin-btn${e.pinned ? ' on' : ''}" data-act="pin" aria-pressed="${!!e.pinned}" title="${esc(t('pin.why'))}">${svg('shield')}${t(e.pinned ? 'pin.remove' : 'pin.add')}</button>`;  // 2.6.0 #20
 
 const protHTML = p => `<span class="prot p-${p}" title="${esc(t('prot.' + p + 'Why'))}">${svg(p === 'kept' ? 'shield' : 'info')}${t('prot.' + p)}</span>`;
 
@@ -1531,6 +1843,7 @@ function renderDetail(e) {
     actions = `<button class="btn sm" data-act="open" ${e.exists ? '' : `disabled title="${esc(t('act.openGone'))}"`}>${svg('open')}${t('act.open')}</button>
       <button class="btn sm" data-act="reveal">${svg('folder')}${t('act.reveal')}</button>
       ${restoreVer ? `<button class="btn sm${e.kind === 'deleted' ? ' primary' : ''}" data-act="restore" data-version="${restoreVer}">${svg('restore')}${t(e.kind === 'deleted' ? 'act.restoreFile' : 'act.restoreThis')}</button>` : ''}
+      ${e.kind === 'modified' && e.has_blob && e.has_prev_blob ? `<button class="btn sm" data-act="report" title="${esc(t('rep.why'))}">${svg('download')}${t('rep.btn')}</button>` : ''}
       ${e.kind !== 'deleted' ? starBtnHTML(e) : ''}
       ${F161 ? `<button class="btn sm" data-note-edit id="noteAddBtn" ${e.note ? 'hidden' : ''}>${svg('note')}${t('note.add')}</button>` : ''}
       ${moreMenuHTML([
@@ -1708,6 +2021,16 @@ function showHits(body, q) {
   go(0);
 }
 
+async function scrubTo(e, kept, i) {  // show version i of the time slider (2.6.0 #11)
+  const k = kept[i], box = $('#scrubView'); if (!k || !box) return;
+  $('#scrubLabel').textContent = `${i + 1} / ${kept.length} · ${fmtFull(k.x.ts)}`;
+  if (e.cat === 'image') { box.innerHTML = `<div class="img-view"><img src="${blobUrl(k.v, e.name)}" alt=""></div>`; return; }
+  const r = await get('/api/content', { hash: k.v, ext: e.ext }).catch(() => null);
+  if (!$('#scrubView') || +$('#scrubRange').value !== i) return;  // moved on meanwhile
+  const lines = (r && r.ok && r.content && r.content.lines) || [];
+  box.innerHTML = lines.length ? `<pre class="scrub-text">${esc(lines.slice(0, 400).join('\n'))}</pre>` : `<div class="meta">${t('sc.noText')}</div>`;
+}
+
 async function renderHistory(e, body, live) {
   const list = await get('/api/history', { path: e.path });
   if (!live()) return;
@@ -1715,8 +2038,13 @@ async function renderHistory(e, body, live) {
   const pick = (v, ts, label) => `<label class="vpick" title="${esc(t('cmp.pickTitle'))}"><input type="checkbox" data-v="${v || ''}" data-ts="${ts}"
     data-label="${esc(label)}" ${v ? '' : 'disabled'}></label>`;
   const onDisk = e.kind === 'file' || e.exists;
+  const kept = list.map(x => ({ x, v: x.kind === 'deleted' ? x.prev_hash : x.hash, has: x.kind === 'deleted' ? x.has_prev_blob : x.has_blob }))
+    .filter(k => k.v && k.has).reverse();  // oldest first, for the time slider (2.6.0 #11)
   body.innerHTML = `<div class="subbar"><span class="meta">${t('hist.count', { n: list.length })}</span><span class="spacer"></span>
+      ${kept.length > 1 ? `<button class="btn sm" id="scrubBtn">${svg('clock')}${t('sc.btn')}</button>` : ''}
+      <button class="btn sm" id="treeBtn">${svg('copy')}${t('lt.btn')}</button>
       <span class="meta" id="cmpHint">${t('cmp.pick')}</span><button class="btn sm" id="cmpBtn" disabled>${svg('compare')}${t('cmp.btn')}</button></div>
+    <div id="scrub" hidden></div>
     <div class="hist">
       ${onDisk ? `<div class="h-item k-current">${pick('current', 9e12, t('cmp.current'))}<div class="h-top"><b>${t('cmp.current')}</b></div></div>` : ''}
       ${list.map(x => {
@@ -1735,6 +2063,24 @@ async function renderHistory(e, body, live) {
     const on = picked();
     if (on.length > 2) on.filter(x => x !== ev.target)[0].checked = false;  // keep the two most recent picks
     $('#cmpBtn').disabled = picked().length !== 2;
+  };
+  $('#treeBtn', body).onclick = async () => {  // evolution tree (2.6.0 #38)
+    const sc = $('#scrub', body); sc.hidden = false;
+    const L = await get('/api/lineage', { path: e.path }).catch(() => null); if (!L) return;
+    const vs = L.versions, W = 640, gap = vs.length > 1 ? Math.min(90, (W - 60) / (vs.length - 1)) : 0, y0 = 30;
+    const xOf = h => { const i = vs.findIndex(v => v.hash === h); return 30 + Math.max(0, i) * gap; };
+    const dots = vs.map((v, i) => `<circle cx="${30 + i * gap}" cy="${y0}" r="6" class="lt-dot"><title>${esc(fmtFull(v.ts))}</title></circle>`).join('');
+    const br = L.branches.map((b, j) => { const x = xOf(b.from), y = y0 + 36 + j * 26;
+      return `<path d="M${x},${y0} C${x},${y} ${x},${y} ${x + 24},${y}" class="lt-br"/><text x="${x + 30}" y="${y + 4}" class="lt-tx">${esc(b.name)} · ${esc(fmtTime(b.ts))}</text>`; }).join('');
+    const h = y0 + 30 + L.branches.length * 26;
+    sc.innerHTML = `<div class="hint">${t('lt.lead', { n: vs.length, m: L.branches.length })}</div>
+      <svg class="lt" viewBox="0 0 ${W} ${h}" width="100%" height="${h}"><line x1="30" y1="${y0}" x2="${30 + Math.max(0, vs.length - 1) * gap}" y2="${y0}" class="lt-main"/>${br}${dots}</svg>`;
+  };
+  if ($('#scrubBtn', body)) $('#scrubBtn', body).onclick = () => {  // time slider (2.6.0 #11)
+    const sc = $('#scrub', body); sc.hidden = !sc.hidden; if (sc.hidden) return;
+    sc.innerHTML = `<div class="scrub-bar"><input type="range" id="scrubRange" min="0" max="${kept.length - 1}" value="${kept.length - 1}"><span class="meta" id="scrubLabel"></span></div><div id="scrubView" class="scrub-view"></div>`;
+    $('#scrubRange').oninput = ev => scrubTo(e, kept, +ev.target.value);
+    scrubTo(e, kept, kept.length - 1);
   };
   $('#cmpBtn').onclick = () => {
     const [a, b] = picked().map(x => ({ v: x.dataset.v, ts: +x.dataset.ts, label: x.dataset.label }));
@@ -2312,11 +2658,15 @@ async function openSettings() {
         <div class="field" style="grid-column: span 2"><label>${t('set.maxStorage')}</label><div class="hint">${t('set.maxStorageHint')}</div><div class="row"><input type="number" id="maxStorage" min="0" step="0.5" value="${s.max_storage_gb ?? 5}"><button class="btn sm" id="storageBtn">${svg('chart')}${t('st.btn')}</button></div></div>
         <div class="field" style="grid-column: span 2"><label>${t('bk.title')}</label><div class="hint">${t('bk.hint')}</div>
           <div class="row"><button class="btn sm" id="backupBtn">${svg('download')}${t('bk.btn')}</button>
-            <button class="btn sm ghost" id="backupRawBtn" title="${esc(t('bk.rawWhy'))}">${t('bk.raw')}</button><span class="hint" id="backupState"></span></div></div>
+            <button class="btn sm ghost" id="backupRawBtn" title="${esc(t('bk.rawWhy'))}">${t('bk.raw')}</button>
+            <button class="btn sm ghost" id="exportBtn2" title="${esc(t('mv.exportWhy'))}">${t('mv.export')}</button>
+            <button class="btn sm ghost" id="importBtn" title="${esc(t('mv.importWhy'))}">${t('mv.import')}</button><span class="hint" id="backupState"></span></div></div>
         <div class="field" style="grid-column: span 2"><label>${t('gd.why')}</label><div class="hint">${t('gd.whyShort')}</div>
           <div class="row"><button class="btn sm" id="guideBtn">${svg('info')}${t('gd.reopen')}</button></div></div>
         <div class="field" style="grid-column: span 2"><label class="switch-row"><input type="checkbox" id="prescan" ${s.prescan !== false ? 'checked' : ''}><span class="switch"></span>
           <span><b>${t('set.prescan')}</b><span class="hint">${t('set.prescanHint')}</span></span></label></div>
+        <div class="field" style="grid-column: span 2"><label class="switch-row"><input type="checkbox" id="milestones" ${s.milestones !== false ? 'checked' : ''}><span class="switch"></span>
+          <span><b>${t('set.milestones')}</b><span class="hint">${t('set.milestonesHint')}</span></span></label></div>
       </div>
       <div class="field"><label>${t('set.exExt')}</label><div class="hint">${t('set.exExtHint')}</div><textarea id="exExt">${list(s.exclude_exts)}</textarea></div>
       <div class="field"><label>${t('set.exNames')}</label><div class="hint">${t('set.exNamesHint', { lock: '<span class="mono">~$*</span>' })}</div><textarea id="exNames">${list(s.exclude_names)}</textarea></div>
@@ -2448,7 +2798,14 @@ async function openSettings() {
   $('#storageBtn').onclick = showStorage;
   $('#backupBtn').onclick = () => startBackup(false);
   $('#backupRawBtn').onclick = () => startBackup(true);
+  $('#exportBtn2').onclick = () => startBackup(false, true);
+  $('#importBtn').onclick = async () => {
+    const r = await post('/api/import').catch(() => ({ ok: false }));
+    if (r.code === 'cancelled') return;
+    if (r.ok) notify(t('mv.staged')); else notify(esc(errText(r)), true);
+  };
   $('#guideBtn').onclick = () => { closeModal(); showGuide(1); };
+  $('#milestones').onchange = ev => post('/api/settings', { milestones: ev.target.checked });
   $('#prescan').onchange = ev => post('/api/settings', { prescan: ev.target.checked }).then(() => notify(t(ev.target.checked ? 'set.prescanOn' : 'set.prescanOff')));
   $('#cleanBtn').onclick = async () => {
     const b = $('#cleanBtn'); b.disabled = true;
@@ -2520,6 +2877,21 @@ async function showRestore(e, version, preferReplace) {
 }
 
 async function act(name, e, btn) {
+  if (name === 'report') {  // the change as an HTML report (2.6.0 #26)
+    const r = await post('/api/diff-report', { id: e.id, lang: LANG }).catch(() => ({}));
+    if (r.code === 'cancelled') return;
+    if (!r.ok) { notify(esc(errText(r)), true); return; }
+    notifyAction(t('rep.done', { path: `<span class="mono">${esc(r.path)}</span>` }), t('act.open'), () => post('/api/open', { path: r.path }), 12000);
+    return;
+  }
+  if (name === 'pin') {  // keep forever (2.6.0 #20)
+    const r = await post('/api/pin', { path: e.path, on: !e.pinned }).catch(() => ({}));
+    if (!r.ok) { notify(esc(errText(r)), true); return; }
+    e.pinned = r.pinned; [...S.events, ...S.files].forEach(x => { if (x.path === e.path) x.pinned = r.pinned; });
+    notify(t(r.pinned ? 'pin.done' : 'pin.undone', { name: esc(e.name) }));
+    if (S.fileSel) selectFile(S.fileSel); else if (S.sel != null) select(S.sel);
+    return;
+  }
   if (name === 'open' || name === 'reveal') {
     const r = await post('/api/' + name, { path: e.path });
     if (!r.ok) notify(esc(errText(r)), true);
@@ -2635,7 +3007,7 @@ function showShortcuts() {
       ${row(['M'], 'help.mode')}${F161 ? row(['1', '–', '4'], 'help.kinds') + row(['C'], 'help.copy')
         + row(['E'], 'help.reveal') + row(['N'], 'help.note') + row(['←', '→'], 'help.tabs') + row(['Home', 'End'], 'help.ends')
         + row(['Ctrl', 'E'], 'help.export') + row(['Ctrl', '1', '…', '5'], 'help.views') : ''}${row(['F5'], 'help.refresh')}${row(['Ctrl', ','], 'help.settings')}
-      ${row(['Ctrl', 'W'], 'help.close')}${row(['Esc'], 'help.esc')}${row(['?'], 'help.help')}
+      ${row(['Ctrl', 'Alt', 'Z'], 'help.hotkey')}${row(['Ctrl', 'W'], 'help.close')}${row(['Esc'], 'help.esc')}${row(['?'], 'help.help')}
     </table><p class="hint" style="margin-top:12px">${t('help.dbl')} ${t('help.right')}</p>
     <p style="margin-top:12px"><button class="btn sm" id="helpGuide">${svg('info')}${t('gd.why')}</button></p></div><div class="m-foot"></div>`, 'sm');
   $('#helpGuide').onclick = () => { closeModal(); showGuide(1); };
@@ -2671,6 +3043,9 @@ function move(delta) {
 
 function wire() {
   $('#list').addEventListener('click', ev => {
+    if (ev.target.closest('#folderAtBtn')) { folderAtDialog(); return; }
+    const ds = ev.target.closest('[data-draft-save]');
+    if (ds) { post('/api/draft-save', { path: ds.dataset.draftSave }).then(r => r.ok ? notifyAction(t('dr.saved', { path: `<span class="mono">${esc(r.path)}</span>` }), t('act.open'), () => post('/api/open', { path: r.path }), 12000) : notify(esc(errText(r)), true)); return; }
     if (S.mode === 'clean' && ev.target.closest('.cl-item,.cl-bar,[data-cl-drive],[data-cl-file],[data-cl-reveal]')) return cleanAct(ev);
     if (ev.target.closest('#moreBtn')) { loadEvents(true); return; }
     if (ev.target.closest('#restoreShown')) {
@@ -2789,8 +3164,11 @@ function wire() {
   $('#rangeYesterday').hidden = !F161;
   $('#notedBtn').innerHTML = svg('note') + '<span class="n" id="notesCount"></span>';
   $('#notedBtn').onclick = () => { S.notedOnly = !S.notedOnly; applyFilters(); };
+  $('#similarBtn').onclick = findSimilar;  // 2.6.0 #32
+  document.addEventListener('toggle', ev => { if (ev.target.classList?.contains('cl-drawer')) S.drawerOpen = ev.target.open; }, true);
   $('#goneBtn').innerHTML = svg('restore') + `<span data-i18n="del.btn">${t('del.btn')}</span>`;
   $('#goneBtn').onclick = () => {  // one click to the files that were deleted and are still missing (2.4.2)
+    get('/api/drafts').then(r => { S.drafts = r.items || []; if (S.goneOnly) renderList(); }).catch(() => {});
     S.goneOnly = !S.goneOnly;
     if (S.goneOnly) { S.kinds = new Set(['deleted']); S.range = 'all'; S.day = null; S.notedOnly = false; }
     else S.kinds.delete('deleted');
@@ -2863,7 +3241,7 @@ function wire() {
     qt = setTimeout(() => { S.q = ev.target.value.trim(); applyFilters(); }, 250);
   });
   $('#detail').addEventListener('click', ev => {
-    if (S.mode === 'clean' && ev.target.closest('[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back],[data-cl-jump]')) return cleanAct(ev);
+    if (S.mode === 'clean' && ev.target.closest('[data-cl-folder],[data-cl-up],[data-cl-reveal],[data-cl-del],[data-cl-online],[data-cl-apps],[data-cl-file],[data-cl-back],[data-cl-jump],[data-growth],[data-cl-tool],[data-lo-del],[data-git-gc],[data-cl-move],[data-cl-moveback],[data-fix-name],[data-cloud-free]')) return cleanAct(ev);
     const e = currentItem();
     const mb = ev.target.closest('[data-more]');
     if (mb) { const m = mb.nextElementSibling; m.hidden = !m.hidden; return; }
@@ -3036,8 +3414,18 @@ async function openFromHash() {
   const h = location.hash;
   if (!h) return;
   history.replaceState(null, '', location.pathname);
-  const ev = /event=(\d+)/.exec(h), file = /file=([^&]+)/.exec(h);
+  const ev = /event=(\d+)/.exec(h), file = /file=([^&]+)/.exec(h), del = /deleted=([^&]+)/.exec(h);
   if (/update/.test(h)) return checkUpdate(true);
+  if (/recent/.test(h)) {  // Ctrl+Alt+Z: what was just deleted or overwritten (2.6.0 #14)
+    S.folder = null; S.goneOnly = false; S.kinds = new Set(['deleted', 'modified']); S.range = 'today'; S.day = null;
+    setMode('changes'); applyFilters();
+    return;
+  }
+  if (del) {  // Explorer: "deleted files here" (2.6.0 #4)
+    S.folder = decodeURIComponent(del[1]); S.goneOnly = true; S.kinds = new Set(['deleted']); S.range = 'all'; S.day = null;
+    setMode('changes'); applyFilters();
+    return;
+  }
   if (file) {
     setMode('files');
     return openFileByPath(decodeURIComponent(file[1]));

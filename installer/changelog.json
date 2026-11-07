@@ -139,17 +139,20 @@
     {
      "level": 5,
      "en": "New: Alert rules — get a desktop notification when a change matches your rule (kind of change, file names like *.docx, and an optional folder), even when other notifications are off",
-     "zh": "新功能：提醒规则——当变更符合你的规则（变更类型、*.docx 之类的文件名、可选的文件夹）时弹出桌面通知，即使其他通知已关闭"
+     "zh": "新功能：提醒规则——当变更符合你的规则（变更类型、*.docx 之类的文件名、可选的文件夹）时弹出桌面通知，即使其他通知已关闭",
+     "feature": "alerts"
     },
     {
      "level": 3,
      "en": "Each rule counts how often it was triggered and when it last was; rules can be switched off without deleting them",
-     "zh": "每条规则都会统计触发次数和最近一次的时间；规则可以关闭而无需删除"
+     "zh": "每条规则都会统计触发次数和最近一次的时间；规则可以关闭而无需删除",
+     "feature": "alerts"
     },
     {
      "level": 2,
      "en": "Changes that matched a rule carry a bell tag with the rule's name",
-     "zh": "符合规则的变更会带上标有规则名称的铃铛标签"
+     "zh": "符合规则的变更会带上标有规则名称的铃铛标签",
+     "feature": "alerts"
     }
    ]
   },
@@ -160,12 +163,14 @@
     {
      "level": 4,
      "en": "Alert rules: one-click templates — an Office document or PDF deleted, anything deleted or moved, a new program or script",
-     "zh": "提醒规则：一键模板——Office 文档或 PDF 被删除、任何文件被删除或移走、出现新的程序或脚本"
+     "zh": "提醒规则：一键模板——Office 文档或 PDF 被删除、任何文件被删除或移走、出现新的程序或脚本",
+     "feature": "alerts"
     },
     {
      "level": 3,
      "en": "While you edit a rule, DeskTrace shows how often it would have triggered in the last 30 days, with examples",
-     "zh": "编辑规则时，桌迹会显示这条规则在最近 30 天内会触发多少次，并给出示例"
+     "zh": "编辑规则时，桌迹会显示这条规则在最近 30 天内会触发多少次，并给出示例",
+     "feature": "alerts"
     }
    ]
   },
@@ -176,12 +181,14 @@
     {
      "level": 5,
      "en": "New: Writing progress — every document (Word, PowerPoint, PDF, Markdown, text) gets a Progress tab charting its word count across all saved versions, with today's and this week's gain (Chinese is counted by character)",
-     "zh": "新功能：写作进度——每个文档（Word、PowerPoint、PDF、Markdown、文本）都有“进度”标签，用图表显示所有已保存版本的字数变化，以及今天和本周新增的字数（中文按字计算）"
+     "zh": "新功能：写作进度——每个文档（Word、PowerPoint、PDF、Markdown、文本）都有“进度”标签，用图表显示所有已保存版本的字数变化，以及今天和本周新增的字数（中文按字计算）",
+     "feature": "writing"
     },
     {
      "level": 4,
      "en": "The Writing view lists the documents you worked on this week, most words added first, each with a small trend line",
-     "zh": "“写作进度”视图列出本周编辑过的文档，按新增字数排序，每个都带有趋势小图"
+     "zh": "“写作进度”视图列出本周编辑过的文档，按新增字数排序，每个都带有趋势小图",
+     "feature": "writing"
     },
     {
      "level": 2,
@@ -197,7 +204,8 @@
     {
      "level": 4,
      "en": "Alert rules no longer flood you: a burst of matching changes (e.g. a deleted folder) becomes one notification per rule",
-     "zh": "提醒规则不再刷屏：一连串符合规则的变更（例如删除整个文件夹）会合并为每条规则一条通知"
+     "zh": "提醒规则不再刷屏：一连串符合规则的变更（例如删除整个文件夹）会合并为每条规则一条通知",
+     "feature": "alerts"
     },
     {
      "level": 4,
@@ -212,17 +220,20 @@
     {
      "level": 3,
      "en": "Alert rules: Show matches lists every change a rule has caught",
-     "zh": "提醒规则：“查看匹配”可列出该规则捕获的所有变更"
+     "zh": "提醒规则：“查看匹配”可列出该规则捕获的所有变更",
+     "feature": "alerts"
     },
     {
      "level": 3,
      "en": "Writing: set a daily word goal and see today's progress towards it",
-     "zh": "写作进度：可设置每日字数目标，并查看今天的完成进度"
+     "zh": "写作进度：可设置每日字数目标，并查看今天的完成进度",
+     "feature": "writing"
     },
     {
      "level": 3,
      "en": "Alert rules: Pause all alerts for a while (e.g. while reorganising files) without changing the rules",
-     "zh": "提醒规则：可暂时“暂停所有提醒”（例如整理文件时），而无需修改规则"
+     "zh": "提醒规则：可暂时“暂停所有提醒”（例如整理文件时），而无需修改规则",
+     "feature": "alerts"
     },
     {
      "level": 3,
@@ -252,7 +263,8 @@
     {
      "level": 2,
      "en": "Statistics: clicking one of the most changed files opens its history",
-     "zh": "统计：点击改动最多的文件会直接打开其历史记录"
+     "zh": "统计：点击改动最多的文件会直接打开其历史记录",
+     "feature": "statistics"
     },
     {
      "level": 3,
@@ -262,17 +274,20 @@
     {
      "level": 3,
      "en": "Alert rules: an optional minimum size, e.g. to be told when a file over 500 MB appears",
-     "zh": "提醒规则：可设置最小文件大小，例如出现超过 500 MB 的文件时提醒"
+     "zh": "提醒规则：可设置最小文件大小，例如出现超过 500 MB 的文件时提醒",
+     "feature": "alerts"
     },
     {
      "level": 2,
      "en": "Alert rules: an optional notification sound per rule",
-     "zh": "提醒规则：每条规则可选择是否播放提示音"
+     "zh": "提醒规则：每条规则可选择是否播放提示音",
+     "feature": "alerts"
     },
     {
      "level": 3,
      "en": "Writing: a chart of the words you wrote on each of the last 7 days, across all documents",
-     "zh": "写作进度：图表显示最近 7 天每天在所有文档中写了多少字"
+     "zh": "写作进度：图表显示最近 7 天每天在所有文档中写了多少字",
+     "feature": "writing"
     },
     {
      "level": 2,
@@ -327,7 +342,8 @@
     {
      "level": 2,
      "en": "Writing: shows how many days in a row you reached your daily goal",
-     "zh": "写作进度：显示连续达成每日目标的天数"
+     "zh": "写作进度：显示连续达成每日目标的天数",
+     "feature": "writing"
     },
     {
      "level": 2,
@@ -337,7 +353,8 @@
     {
      "level": 2,
      "en": "Ctrl+3, Ctrl+4 and Ctrl+5 open Duplicates, Space and Writing (Ctrl+1 / Ctrl+2: Changes / Files)",
-     "zh": "Ctrl+3、Ctrl+4、Ctrl+5 分别打开重复文件、空间占用和写作进度（Ctrl+1 / Ctrl+2：变更 / 文件）"
+     "zh": "Ctrl+3、Ctrl+4、Ctrl+5 分别打开重复文件、空间占用和写作进度（Ctrl+1 / Ctrl+2：变更 / 文件）",
+     "feature": "writing"
     },
     {
      "level": 2,
@@ -347,7 +364,8 @@
     {
      "level": 2,
      "en": "While the window is open, changes caught by an alert rule also pop up inside it, with the rule's name",
-     "zh": "窗口打开时，符合提醒规则的变更也会在窗口内弹出提示，并显示规则名称"
+     "zh": "窗口打开时，符合提醒规则的变更也会在窗口内弹出提示，并显示规则名称",
+     "feature": "alerts"
     },
     {
      "level": 2,
@@ -362,7 +380,8 @@
     {
      "level": 1,
      "en": "Duplicates, Space and Writing only recalculate while their view is open, so DeskTrace does less work in the background",
-     "zh": "重复文件、空间占用和写作进度只在打开对应视图时重新计算，后台负担更小"
+     "zh": "重复文件、空间占用和写作进度只在打开对应视图时重新计算，后台负担更小",
+     "feature": "writing"
     },
     {
      "level": 1,
@@ -378,12 +397,14 @@
     {
      "level": 5,
      "en": "New: Folder time travel — see any monitored folder as it was at any moment (files edited, deleted or renamed since included) and rebuild it as a new folder next to it; nothing is overwritten",
-     "zh": "新功能：文件夹时光回溯——查看任意监控文件夹在任意时刻的样子（包括之后被修改、删除或重命名的文件），并把它重建为旁边的新文件夹；不会覆盖任何文件"
+     "zh": "新功能：文件夹时光回溯——查看任意监控文件夹在任意时刻的样子（包括之后被修改、删除或重命名的文件），并把它重建为旁边的新文件夹；不会覆盖任何文件",
+     "feature": "timetravel"
     },
     {
      "level": 4,
      "en": "Time travel shows a preview first: every file it would rebuild, where it comes from, and which ones cannot be rebuilt because that version was not kept",
-     "zh": "时光回溯会先显示预览：将重建的每个文件、它的来源，以及哪些文件因当时的版本没有保留而无法重建"
+     "zh": "时光回溯会先显示预览：将重建的每个文件、它的来源，以及哪些文件因当时的版本没有保留而无法重建",
+     "feature": "timetravel"
     },
     {
      "level": 3,
@@ -393,7 +414,8 @@
     {
      "level": 2,
      "en": "Time travel is in the sidebar and in Space's folder view, with quick choices for 1 hour, 1 day and 1 week ago",
-     "zh": "时光回溯位于侧边栏和“空间占用”的文件夹视图中，并提供 1 小时前、1 天前、1 周前等快捷选项"
+     "zh": "时光回溯位于侧边栏和“空间占用”的文件夹视图中，并提供 1 小时前、1 天前、1 周前等快捷选项",
+     "feature": "timetravel"
     },
     {
      "level": 4,
@@ -418,7 +440,8 @@
     {
      "level": 3,
      "en": "Duplicates, Space and Writing are only worked out again after something changed, so switching to them is instant",
-     "zh": "重复文件、空间占用和写作进度只在有变化后才重新计算，切换到这些视图时即时显示"
+     "zh": "重复文件、空间占用和写作进度只在有变化后才重新计算，切换到这些视图时即时显示",
+     "feature": "writing"
     },
     {
      "level": 3,
@@ -433,7 +456,8 @@
     {
      "level": 2,
      "en": "Writing works out each document's progress once instead of twice",
-     "zh": "写作进度对每个文档只计算一次进度，而不是两次"
+     "zh": "写作进度对每个文档只计算一次进度，而不是两次",
+     "feature": "writing"
     },
     {
      "level": 2,
@@ -488,7 +512,8 @@
     {
      "level": 3,
      "en": "Writing: hide a document from Writing (right-click or its Progress tab), and show hidden documents again",
-     "zh": "写作进度：可将文档从“写作进度”中隐藏（右键或其“进度”标签页），也可重新显示已隐藏的文档"
+     "zh": "写作进度：可将文档从“写作进度”中隐藏（右键或其“进度”标签页），也可重新显示已隐藏的文档",
+     "feature": "writing"
     },
     {
      "level": 3,
@@ -533,7 +558,8 @@
     {
      "level": 3,
      "en": "Writing opens about 10 times faster with a long history: each document's word counts are reused until it changes, and this week's documents are looked up by date",
-     "zh": "历史记录很长时，“写作进度”的打开速度提高约 10 倍：每个文档的字数在其变化前会被重复使用，本周的文档按日期查找"
+     "zh": "历史记录很长时，“写作进度”的打开速度提高约 10 倍：每个文档的字数在其变化前会被重复使用，本周的文档按日期查找",
+     "feature": "writing"
     },
     {
      "level": 2,
@@ -543,7 +569,8 @@
     {
      "level": 2,
      "en": "Statistics open about twice as fast with a long history",
-     "zh": "历史记录很长时，“统计”的打开速度提高约一倍"
+     "zh": "历史记录很长时，“统计”的打开速度提高约一倍",
+     "feature": "statistics"
     },
     {
      "level": 3,
@@ -558,12 +585,14 @@
     {
      "level": 2,
      "en": "Alert rules: new quick-add template \"Large file appears (500 MB or more)\"",
-     "zh": "提醒规则：新增快速添加模板“出现大文件（500 MB 以上）”"
+     "zh": "提醒规则：新增快速添加模板“出现大文件（500 MB 以上）”",
+     "feature": "alerts"
     },
     {
      "level": 2,
      "en": "Alert rules: duplicate a rule to make a similar one quickly",
-     "zh": "提醒规则：可复制一条规则，快速创建相似的规则"
+     "zh": "提醒规则：可复制一条规则，快速创建相似的规则",
+     "feature": "alerts"
     },
     {
      "level": 3,
@@ -593,7 +622,8 @@
     {
      "level": 1,
      "en": "Writing: when more than 200 documents were edited in a week, it now shows the 200 edited most recently instead of an arbitrary 200",
-     "zh": "写作进度：一周内编辑的文档超过 200 个时，现在显示最近编辑的 200 个，而不是随意的 200 个"
+     "zh": "写作进度：一周内编辑的文档超过 200 个时，现在显示最近编辑的 200 个，而不是随意的 200 个",
+     "feature": "writing"
     }
    ]
   },
@@ -629,7 +659,13 @@
     {
      "level": 3,
      "en": "Simpler: Folder time travel, Writing progress and Alert rules were removed; your notifications for changes and deletions stay as they were",
-     "zh": "更简洁：删除了文件夹时光回溯、写作进度和提醒规则；变更与删除通知保持不变"
+     "zh": "更简洁：删除了文件夹时光回溯、写作进度和提醒规则；变更与删除通知保持不变",
+     "removes": {
+      "timetravel": "2.1.0",
+      "writing": "2.0.0",
+      "alerts": "1.9.0"
+     },
+     "removal_only": true
     },
     {
      "level": 3,
@@ -644,12 +680,14 @@
     {
      "level": 2,
      "en": "Statistics: the changes-per-day chart shows every day (quiet days next to a busy one stay visible), its scale and its dates",
-     "zh": "统计：每日变更图显示每一天（繁忙日旁的少量变更也清晰可见），并显示刻度和日期"
+     "zh": "统计：每日变更图显示每一天（繁忙日旁的少量变更也清晰可见），并显示刻度和日期",
+     "feature": "statistics"
     },
     {
      "level": 1,
      "en": "Statistics: clicking a day in the chart now opens that day's changes",
-     "zh": "统计：点击图表中的某一天现在会打开当天的变更"
+     "zh": "统计：点击图表中的某一天现在会打开当天的变更",
+     "feature": "statistics"
     }
    ]
   },
@@ -776,7 +814,8 @@
     {
      "level": 3,
      "en": "Undo for 10 seconds after anything was moved to the Recycle Bin — one file or a whole cleaning run; an occupied original place is never overwritten",
-     "zh": "移到回收站后 10 秒内可以撤销——无论是单个文件还是一次清理；原位置已被占用时绝不覆盖"
+     "zh": "移到回收站后 10 秒内可以撤销——无论是单个文件还是一次清理；原位置已被占用时绝不覆盖",
+     "feature": "undo10s"
     },
     {
      "level": 3,
@@ -791,7 +830,11 @@
     {
      "level": 3,
      "en": "Simpler: Statistics was removed (its tab, the tray entry and the I shortcut)",
-     "zh": "更简洁：删除了“统计”（其标签页、托盘菜单项和 I 快捷键）"
+     "zh": "更简洁：删除了“统计”（其标签页、托盘菜单项和 I 快捷键）",
+     "removes": {
+      "statistics": "1.6.1"
+     },
+     "removal_only": true
     },
     {
      "level": 2,
@@ -878,7 +921,10 @@
     {
      "level": 3,
      "en": "After a cleanup, \"Put them back\" stays available in Clean up as long as the Recycle Bin is not emptied, instead of a 10-second offer",
-     "zh": "清理后，“放回原处”会一直留在“空间清理”中（只要回收站没有清空），不再是 10 秒内的临时按钮"
+     "zh": "清理后，“放回原处”会一直留在“空间清理”中（只要回收站没有清空），不再是 10 秒内的临时按钮",
+     "removes": {
+      "undo10s": "2.4.0"
+     }
     },
     {
      "level": 2,
@@ -942,6 +988,109 @@
      "zh": "标签改为直白的说法，不再显示“请改为卸载”：程序文件、云同步文件、应用数据、软件设置或缓存、你的文件、可以删除"
     }
    ]
+  },
+  {
+   "version": "2.6.0",
+   "date": "2026-11-07",
+   "changes": [
+    {
+     "level": 5,
+     "en": "What grew recently: Clean up compares full scans of a drive and shows the folders that grew most in the last 24 hours or 7 days, naming the deepest folder responsible",
+     "zh": "最近哪里变大了：空间清理比较磁盘的两次完整扫描，列出过去 24 小时或 7 天增长最多的文件夹，并指出真正导致增长的最深一层"
+    },
+    {
+     "level": 5,
+     "en": "Mass-change guard: when 100 or more files are changed, deleted or renamed within seconds (a script gone wrong, a sync conflict, ransomware), a red banner appears and one click puts every file back as it was before",
+     "zh": "大量变化防护：几秒内有 100 个以上文件被修改、删除或重命名（出错的脚本、同步冲突、勒索病毒）时显示红色横幅，一键把每个文件恢复到之前的样子"
+    },
+    {
+     "level": 5,
+     "en": "Move a big folder to another drive: copied, every file checked, a link left in its place so programs find it as before, and it can be moved back",
+     "zh": "大文件夹搬家：复制到其他磁盘并逐个文件核对，在原位置留下链接，程序照常能找到；随时可以搬回来"
+    },
+    {
+     "level": 5,
+     "en": "Move to a new PC: export the whole history as one file and import it on another PC; the history that was there is kept aside",
+     "zh": "换电脑：把整个历史记录导出为一个文件，在另一台电脑上导入；那台电脑原有的历史记录会另存一份"
+    },
+    {
+     "level": 5,
+     "en": "A folder as it was at any time: written as a copy next to it, with every file in the version it had then",
+     "zh": "文件夹在任意时刻的样子：在旁边写出一份副本，每个文件都是当时的版本"
+    },
+    {
+     "level": 5,
+     "en": "Similar photos: burst shots, edits and resized copies grouped together, the sharpest one marked",
+     "zh": "相似照片：把连拍、修图和缩放后的副本归为一组，标出最清晰的一张"
+    },
+    {
+     "level": 4,
+     "en": "Keep forever: a file whose every version is kept whatever the history limits say, and that Clean up never deletes",
+     "zh": "永久保留：文件的每个版本都会保留，不受历史记录期限影响，空间清理也绝不删除它"
+    },
+    {
+     "level": 4,
+     "en": "Undo a batch rename, find unsaved Office and WPS drafts after a crash, and name the program that has a file open when it cannot be restored or deleted",
+     "zh": "一键撤销批量重命名；程序崩溃后找回 Office 和 WPS 未保存的草稿；文件因被占用无法恢复或删除时，指出是哪个程序在使用它"
+    },
+    {
+     "level": 4,
+     "en": "New in Clean up: dependencies of old projects, other browsers' and graphics shader caches, older installer versions, broken shortcuts and empty folders, compression of large old files (nothing deleted), large Git repositories, chat apps' old received media (never their chat history), cloud folders on this PC vs online only, and possible leftovers of uninstalled programs",
+     "zh": "空间清理新增：旧项目的依赖、其他浏览器和显卡着色器缓存、安装包旧版本、失效快捷方式和空文件夹、压缩体积大的旧文件（不删除任何文件）、体积很大的 Git 仓库、聊天软件收到的旧媒体（绝不动聊天记录）、云同步文件夹在本机与仅联机的分布，以及可能是已卸载软件的残留"
+    },
+    {
+     "level": 4,
+     "en": "Duplicates can be kept in every place but stored once (hard links)",
+     "zh": "重复文件可以全部保留在原处，但在磁盘上只占一份空间（硬链接）"
+    },
+    {
+     "level": 3,
+     "en": "History: a time slider over every version, an evolution view with the copies made from a file, a comparison report to save as a web page, and badges saying whether a deleted file can be fully restored",
+     "zh": "历史记录：可在所有版本间拖动的时间轴、显示由文件复制出的副本的演变图、可保存为网页的对比报告，以及标明被删除文件能否完整找回的标记"
+    },
+    {
+     "level": 3,
+     "en": "Explorer: right-click a folder for the files deleted there; Ctrl+Alt+Z anywhere shows today's deleted and overwritten files",
+     "zh": "资源管理器：右键文件夹即可找回在那里删除的文件；在任何地方按 Ctrl+Alt+Z 显示今天删除和被覆盖的文件"
+    },
+    {
+     "level": 3,
+     "en": "Windows tools in Clean up (Disk Cleanup, Optimize drives, search index), each disk's health, a smaller hibernation file option, and Windows upgrade leftovers",
+     "zh": "空间清理中的 Windows 工具（磁盘清理、优化驱动器、搜索索引）、各磁盘的健康状态、缩小休眠文件，以及 Windows 升级残留"
+    },
+    {
+     "level": 3,
+     "en": "Names Windows cannot handle (ending in a space or dot, paths over 260 characters) are listed and can be fixed",
+     "zh": "列出 Windows 无法处理的文件名（以空格或句点结尾、路径超过 260 个字符），并可一键修正"
+    },
+    {
+     "level": 2,
+     "en": "Kept versions are checked in idle time; the tray turns green during busy moments and red on a mass change; a removable drive gets a card when plugged in; quieter on low battery and during presentations; Mica title bar on Windows 11; optional milestone cards",
+     "zh": "空闲时校验保存的版本；托盘图标在大量写入时变绿、出现大量变化时变红；插入移动硬盘时显示提示；低电量和演示时更安静；Windows 11 标题栏使用 Mica 效果；可关闭的里程碑提示"
+    },
+    {
+     "level": 1,
+     "en": "Renames are no longer paired with the wrong file when many files share the same size and time",
+     "zh": "大量文件大小和时间相同时，不再把重命名配错文件"
+    },
+    {
+     "level": 1,
+     "en": "Gemini review: a folder is never moved while any program has one of its files open (also programs that allow sharing), \"That was me\" silences the mass-change alert for 10 minutes, possible leftovers are worded more carefully and skip well-known vendors, and the extra Clean up lists sit in one folding section",
+     "zh": "Gemini 评审：只要有程序打开着文件夹中的任何文件（包括允许共享的程序），就不会搬家；“是我自己做的”会让大量变化提示静默 10 分钟；可能的残留文件夹用更谨慎的说法，并跳过知名厂商；空间清理的扩展列表收进一个可折叠的区域"
+    },
+    {
+     "level": 2,
+     "en": "Updating across several versions, the notes show only what you really get: features added and removed again in between are left out, and a removal is only mentioned if you had that feature",
+     "zh": "跨越多个版本更新时，更新说明只显示你实际得到的内容：中间加入又被移除的功能不再列出；只有你用过的功能被移除时才会提到"
+    }
+   ]
   }
- ]
+ ],
+ "removed_features": {
+  "alerts": "2.2.0",
+  "writing": "2.2.0",
+  "timetravel": "2.2.0",
+  "statistics": "2.4.0",
+  "undo10s": "2.4.2"
+ }
 }
