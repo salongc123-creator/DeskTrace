@@ -86,6 +86,9 @@ SM_CXICON, SM_CXSMICON = 11, 49
 CLASS_NAME = 'DesktopWatchTray'
 
 
+WM_APP_HOTKEY = 0x8000 + 7
+
+
 class Tray:
     """``menu()`` returns a list of items: ('-',) for a separator, (cmd, label, checked) for an
     entry, or ('>', label, [items]) for a submenu. The first entry is shown in bold (default)."""
@@ -132,7 +135,7 @@ class Tray:
                 self._state_icon[k] = LoadImageW(None, str(p), IMAGE_ICON, small, small, LR_LOADFROMFILE)
             self.added = self._notify(NIM_ADD)
             # 2.6.0 #14: Ctrl+Alt+Z anywhere -> the files just deleted or overwritten (if no other program took it)
-            self.hotkey = bool(ctypes.windll.user32.RegisterHotKey(self.hwnd, HOTKEY_ID, 0x0002 | 0x0001 | 0x4000, ord('Z')))
+            self._register_hotkey()
         finally:
             self.ready.set()
         msg = wintypes.MSG()
@@ -167,6 +170,9 @@ class Tray:
                     self._show_menu()
                 elif event == NIN_BALLOONUSERCLICK:
                     self.on_command('open-notification')
+                return 0
+            if msg == WM_APP_HOTKEY:  # 2.7.0 M2-22: the setting changed
+                self._register_hotkey()
                 return 0
             if msg == WM_HOTKEY and wparam == HOTKEY_ID:
                 self.on_command('quick-restore')
@@ -214,6 +220,20 @@ class Tray:
         TrackPopupMenu(hmenu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, pt.x, pt.y, 0, self.hwnd, None)
         PostMessageW(self.hwnd, WM_NULL, 0, 0)
         DestroyMenu(hmenu)
+
+    HOTKEYS = {'ctrl+alt+z': 0x0002 | 0x0001, 'ctrl+shift+alt+z': 0x0002 | 0x0004 | 0x0001}
+
+    def _register_hotkey(self):
+        """(Re)register the global shortcut on the tray's own thread (Windows ties it there); 'off' = none."""
+        u32 = ctypes.windll.user32
+        u32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
+        mods = self.HOTKEYS.get(getattr(self, 'hotkey_spec', 'ctrl+alt+z'))
+        self.hotkey = bool(mods) and bool(u32.RegisterHotKey(self.hwnd, HOTKEY_ID, mods | 0x4000, ord('Z')))
+
+    def set_hotkey(self, spec):
+        self.hotkey_spec = spec
+        if self.hwnd:
+            PostMessageW(self.hwnd, WM_APP_HOTKEY, 0, 0)
 
     # -- any thread ----------------------------------------------------------------------------
     def command_id(self, name):

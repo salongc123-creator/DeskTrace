@@ -411,6 +411,20 @@ class AppWindow:
             self.set_dark_titlebar(self.dark)
         if msg.get('cmd') == 'close':
             u32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
+        if msg.get('cmd') == 'beep':  # 2.7.0 M1-19: the Windows notification sound (follows the sound settings)
+            u32.MessageBeep(0x40)
+        if 'topmost' in msg:  # 2.7.0 M1-2: on top of other windows, and a compact width
+            u32.SetWindowPos(self.hwnd, PV(-1 if msg['topmost'] else -2), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+        if 'compact' in msg and bool(msg['compact']) != getattr(self, 'compact', None):
+            self.compact = bool(msg['compact'])
+            r = RECT()
+            u32.GetWindowRect(self.hwnd, ctypes.byref(r))
+            scale = (u32.GetDpiForWindow(self.hwnd) or 96) / 96
+            if self.compact:
+                self.wide = r.right - r.left
+                u32.SetWindowPos(self.hwnd, None, 0, 0, int(740 * scale), r.bottom - r.top, 0x0002 | 0x0004 | 0x0010)
+            elif getattr(self, 'wide', None):
+                u32.SetWindowPos(self.hwnd, None, 0, 0, self.wide, r.bottom - r.top, 0x0002 | 0x0004 | 0x0010)
         if msg.get('cmd') == 'external' and str(msg.get('url', '')).startswith(('http://', 'https://', 'mailto:')):
             os.startfile(msg['url'])
 

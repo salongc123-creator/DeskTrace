@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Undo for your files, and a clear view of what fills your disk — for Windows 10/11.</b><br>
-  Every version of the files in your folders is kept, so a deleted or overwritten file can be brought back in two clicks.
+  Every saved version of the files in your folders is kept (up to a size limit you choose), so a deleted or overwritten file can be brought back in two clicks.
 </p>
 
 <p align="center">
@@ -21,16 +21,23 @@
 ## What it does
 
 **History & restore**
-- Watches the folders you choose (your Desktop and Documents by default) and keeps a copy of **every version** of every file — compressed and de-duplicated.
+- Watches the folders you choose (your Desktop and Documents by default) and keeps a copy of **every version** of every file up to the snapshot limit (50 MB by default) — compressed and de-duplicated. Larger, excluded or online-only files are recorded without a copy, and each file says whether it can be restored.
 - **Find deleted** lists every file that was deleted and is still missing; **Restore** puts it back where it was, or as a new copy next to it. Restoring never overwrites anything unless you ask for it, and a file open in another program is left untouched.
 - See **exactly what changed** between versions of Word, Excel, PowerPoint, PDF, Markdown, text and code files, and preview images and archives.
 - Search by name or by **content** (Chinese included). Add notes to versions, star files, export the list to Excel.
 - An unplugged drive or a network folder that is away is never taken for "everything deleted".
 - **Mass-change guard:** if many files are changed, deleted or renamed within seconds (a script gone wrong, ransomware), a red banner appears and one click puts them all back.
 - See a whole folder **as it was at any time**, undo a batch rename, rescue unsaved Office/WPS drafts, **keep forever** the files that matter, and move your whole history **to a new PC** in one file.
+- **Search in plain words** ("deleted Excel files last week", "上周删除的表格"), see **what changed in the structure** of Word, Markdown, PowerPoint and Excel files, pick several changes at once, save views, and export all versions of a file with a manifest.
+- Replacing a file with an older version **keeps its current content first**, so every replace can be undone.
+
+**Trust and history** (Settings)
+- An **activity record** of every restore, cleanup, backup, settings change and note — by you or by DeskTrace — without the text of your notes.
+- A **protection overview**: how many watched files have a kept version and why the others have none.
+- **What will be forgotten** in the next 7 days under the current limits (noted and kept-forever versions never are), limits **per folder**, a weekly report, and restoring a backup folder by **merging** it into the current history or replacing it — the previous history is always kept aside.
 
 **Clean up**
-- **What grew recently:** compares scans of a drive and names the folders that grew most in the last day or week.
+- **What grew recently:** compares scans of a drive and names the folders that grew most in the last day or week; the space map can show the drive **as it was 7, 14 or 30 days ago** or coloured by growth, and a steady rise gives a "full in about N–M days" estimate.
 - **Move a big folder to another drive** safely (every file checked, a link left in its place), and find similar photos, old project dependencies, large Git repositories, cloud folders' local copies and more.
 - Shows what takes up the space on any drive, with charts by folder and file type, and the biggest files.
 - A **space map** shows every folder as a block sized by its space, split into its biggest subfolders — click one to jump to it in the list. Reading a drive uses several worker processes sharing one queue (1.86 million files in about 35 s on the test PC).
@@ -47,6 +54,8 @@
 | ![Find deleted](docs/screenshots/en/1b-find-deleted.png) | ![Clean up](docs/screenshots/en/4-clean-up.png) |
 | **Restore safely** | **A drive that went away** |
 | ![Restore dialog](docs/screenshots/en/3-restore-dialog.png) | ![Warning banner](docs/screenshots/en/6-warning-banner.png) |
+| **Trust and history** | **What changed in the structure** |
+| ![Trust and history](docs/screenshots/en/11-trust-and-history.png) | ![Structure summary](docs/screenshots/en/05-structure-summary.png) |
 
 ## Download and install
 
@@ -84,6 +93,9 @@ Version licenses are signed with a private release key that is **not** part of t
 | Part | File |
 |---|---|
 | Local service, monitoring, history store (SQLite WAL + FTS5), restore, API | `desktop_watch/server.py` |
+| 2.7.0 features: preferences, notifications, activity record, list sorting and filters | `desktop_watch/features.py` |
+| Space over time, disk-full estimate, plain-language search, structure summaries | `desktop_watch/insights.py` |
+| Protection overview, retention preview and per-folder limits, backup restore, weekly report, version export | `desktop_watch/trust.py` |
 | Windows change notifications (`ReadDirectoryChangesW`) | `desktop_watch/winwatch.py` |
 | Drive scan and Clean up (consequences, Recycle Bin, cloud placeholders) | `desktop_watch/cleaner.py` |
 | Text from Word, Excel, PowerPoint, PDF and more | `desktop_watch/extractors.py` |
@@ -115,11 +127,18 @@ Bug reports and ideas are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 **桌迹**是一款 Windows 10/11 桌面软件：**给文件加上“撤销”**，并**看清磁盘空间被什么占用**。
 
 **历史与找回**
-- 监控你选择的文件夹（默认是桌面和文档），为每个文件的**每一个版本**保存副本（压缩、去重）。
+- 监控你选择的文件夹（默认是桌面和文档），为不超过快照上限（默认 50 MB）的文件的**每一个版本**保存副本（压缩、去重）。更大的、被排除的或仅在线的文件只记录变化、不保存副本；每个文件都会注明能否恢复。
 - **找回已删除**：列出所有被删除、至今仍不在原处的文件，点“恢复”即可放回原处，或在旁边另存一份。除非你选择替换，恢复永远不会覆盖任何文件；文件正被其他程序打开时保持原样。
 - 精确对比 Word、Excel、PowerPoint、PDF、Markdown、文本和代码文件各版本之间**改了哪里**，可预览图片和压缩包。
 - 按文件名或**内容**搜索（支持中文）；为版本添加备注、为文件加星标、导出 Excel。
 - 移动硬盘拔出或网络文件夹断开，绝不会被当作“全部删除”。
+- **用自然语言搜索**（“上周删除的表格”），查看 Word、Markdown、PowerPoint、Excel 的**结构变化**，多选批量处理，保存视图，导出文件的全部版本及清单。
+- 用旧版本替换文件前会**先保存当前内容**，每次替换都能撤回。
+
+**可信与历史**（设置）
+- **活动记录**：你或桌迹做过的每次恢复、清理、备份、设置更改和备注（不记录备注文字）。
+- **保护概览**：多少受监控文件有已保存版本，其余的为什么没有。
+- 按当前规则提前列出**未来 7 天将清除的内容**（带备注和永久保留的版本绝不清除），**按文件夹设置保留规则**，保护周报，以及从备份文件夹**合并**或替换恢复——原来的历史总会另外保留。
 
 **空间清理**
 - **最近哪里变大了**：比较磁盘的两次扫描，指出最近一天或一周增长最多的文件夹。
@@ -138,5 +157,7 @@ Bug reports and ideas are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 | 找回已删除 | 空间清理 |
 |---|---|
 | ![找回已删除](docs/screenshots/zh/1b-find-deleted.png) | ![空间清理](docs/screenshots/zh/4-clean-up.png) |
+| **可信与历史** | **结构变化** |
+| ![可信与历史](docs/screenshots/zh/11-trust-and-history.png) | ![结构变化](docs/screenshots/zh/05-structure-summary.png) |
 
 许可证：[MIT](LICENSE)

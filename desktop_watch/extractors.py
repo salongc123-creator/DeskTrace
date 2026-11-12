@@ -14,7 +14,6 @@ import posixpath
 import re
 import struct
 import zipfile
-import xml.etree.ElementTree as ET
 
 VERSION = 2  # bump when extraction output changes, so cached results are rebuilt
 MAX_LINES = 60000
@@ -157,6 +156,7 @@ VML = '{urn:schemas-microsoft-com:vml}'
 
 def _xml(z, name):
     try:
+        import xml.etree.ElementTree as ET  # only when an Office file is read (2.7.0 O5)
         return ET.fromstring(z.read(name))
     except KeyError:
         return None
@@ -447,6 +447,7 @@ def _xlsx(data, ext):
             continue
         cells = {}
         with z.open(path) as fh:
+            import xml.etree.ElementTree as ET
             for _, el in ET.iterparse(fh):
                 if el.tag != SML + 'c':
                     continue

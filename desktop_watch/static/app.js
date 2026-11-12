@@ -72,6 +72,7 @@ async function get(path, params = {}) {
   return r.json();
 }
 async function post(path, body = {}) {
+  if (/^\/api\/(clean\/|chat-media-clean)/.test(path)) S.cleanActs = (S.cleanActs || 0) + 1;  // something changed on a drive (2.7.0 O4)
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': TOKEN }, body: JSON.stringify(body) });
   return r.json();
 }
@@ -693,8 +694,12 @@ async function loadClean(again = false) {
     d = { ...d, state: 'scanning', files: 0, bytes: 0, items_state: 'scanning' };
   }
   S.clean = d;
-  S.lastClean = await get('/api/clean/last').catch(() => null);
-  S.growth = await get('/api/clean/growth', { drive: d.drive, days: S.growthDays || 1 }).catch(() => null);
+  const sideKey = `${d.drive}|${d.state}|${d.cached_at || ''}|${S.cleanActs || 0}`;  // 2.7.0 O4: not on every poll of a running scan
+  if (S.cleanSide !== sideKey) {
+    S.cleanSide = sideKey;
+    S.lastClean = await get('/api/clean/last').catch(() => null);
+    S.growth = await get('/api/clean/growth', { drive: d.drive, days: S.growthDays || 1 }).catch(() => null);
+  }
   if (d.state !== 'scanning' && (!S.leftovers || S.leftovers.at !== d.cached_at)) {
     S.leftovers = await get('/api/clean/leftovers').catch(() => null); if (S.leftovers) S.leftovers.at = d.cached_at;
   }

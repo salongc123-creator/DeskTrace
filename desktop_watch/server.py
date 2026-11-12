@@ -17,7 +17,6 @@ How it works
 import argparse
 import contextlib
 import re
-import difflib
 import fnmatch
 import hashlib
 import io
@@ -35,7 +34,6 @@ import threading
 import time
 import http.cookies
 import urllib.parse
-import webbrowser
 import zipfile
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -47,13 +45,15 @@ import tray as traymod
 import updates as updmod
 import winwatch
 import cleaner
-import xlsx
+import features
+import insights
+import trust
 from extractors import EXTRACTABLE, VERSION as EXTRACT_VERSION, category_of, extract
 
 APP_DIR = Path(__file__).resolve().parent
 APP_ID = 'desktop-watch/1'   # internal id (kept from the old name: older copies answer to it)
 APP_NAME = 'DeskTrace'
-APP_VERSION = '2.6.0'      # the installer and update licenses take their version number from here
+APP_VERSION = '2.7.0'      # the installer and update licenses take their version number from here
 SCHEMA_VERSION = 2       # bump with a step in migrate() whenever stored data changes shape
 TOKEN = secrets.token_hex(16)
 
@@ -584,6 +584,10 @@ class Monitor:
                 if drives is not None:
                     for d in set(rem) - drives:
                         App.hub.publish({'type': 'drive', 'drive': rem[d]})
+                    for d in drives - set(rem):  # 2.7.0 M2-30: taken out
+                        App.hub.publish({'type': 'drive-gone', 'drive': d})
+                        _scans.pop(d, None)
+                        _cleanable.pop(d, None)
                 drives = set(rem)
             except Exception:
                 pass
@@ -971,15 +975,17 @@ class Monitor:
         # mass change guard (2.6.0 #6): a batch job gone wrong or ransomware touches many files at once
         hits = len(modified) + len(deleted) + len(renames)
         if hits and not first and now > getattr(self, 'mass_quiet', 0):
-            win = [x for x in getattr(self, '_burst', []) if now - x[0] <= MASS_WINDOW] + [(now, hits)]
+            mass_n, mass_window = trust.mass_limits()  # 2.7.0 F6: adjustable in Settings
+            win = [x for x in getattr(self, '_burst', []) if now - x[0] <= mass_window] + [(now, hits)]
             self._burst = win
             total = sum(n for _, n in win)
-            if total >= MASS_N:
+            if total >= mass_n:
                 m = getattr(self, 'mass', None)
                 if m and now - m['until'] < 120:
                     m.update(until=now, n=m['n'] + hits)
                 else:
                     self.mass = {'since': win[0][0] - SETTLE - 2, 'until': now, 'n': total}
+                    features.log_action('mass-alert', f'{total} changes', source='auto')
         if new_roots:
             self.known_roots |= set(new_roots)
             self.store.set_meta('known_roots', sorted(self.known_roots))
@@ -1142,9 +1148,13 @@ class Monitor:
             self.housekeeping_wake.clear()
             try:
                 check_integrity()
-                self.cleanup()
-                recompress_old(self.store)
-                verify_blobs(self.store)
+                r = self.cleanup()
+                if r.get('events') or r.get('freed'):  # 2.7.0 F1: what upkeep removed on its own
+                    features.log_action('retention-cleanup', f"{r.get('events', 0)} changes", size=r.get('freed') or 0, source='auto')
+                blobs = list(iter_blobs())  # one listing for the rest of this run (2.7.0 O6)
+                App.blob_count = (len(blobs), time.time())
+                recompress_old(self.store, blobs=blobs)
+                verify_blobs(self.store, blobs=blobs)
                 self.store.tidy()
             except Exception as e:
                 print('cleanup error:', repr(e), file=sys.stderr)
@@ -1157,9 +1167,8 @@ class Monitor:
         days = float(self.settings.get('keep_days') or 0)
         cap = float(self.settings.get('max_storage_gb') or 0) * 1024 ** 3
         # Versions the user labelled with a note are kept no matter how old.
-        removed = st.count('DELETE FROM events WHERE ts < ? AND id NOT IN (SELECT event_id FROM notes)'
-                           ' AND path NOT IN (SELECT path FROM pins)',  # pinned: kept forever (2.6.0 #20)
-                           (time.time() - days * 86400,)) if days > 0 else 0
+        # pinned files (2.6.0 #20) and noted versions are kept; per-folder limits (2.7.0 F10) — the same rule the preview (F3) uses
+        removed = trust.expire_old(st)
         freed = 0
         with self.lock:  # no new snapshots while deciding what is unused
             keep = {c[2] for c in self.confirmed.values() if c[2]}
@@ -1192,6 +1201,7 @@ class Monitor:
                     if total <= cap:
                         break
                     drop(h, size, f)
+            freed += trust.folder_caps(st, [b for b in blobs if b[0] not in dropped], keep)  # 2.7.0 F10: a folder's own cap
             st.x('DELETE FROM contents WHERE hash NOT IN (SELECT hash FROM files WHERE hash IS NOT NULL)'
                  ' AND hash NOT IN (SELECT hash FROM events WHERE hash IS NOT NULL)'
                  ' AND hash NOT IN (SELECT prev_hash FROM events WHERE prev_hash IS NOT NULL)')
@@ -1249,8 +1259,12 @@ class Monitor:
                 'mute_until': float(self.settings.get('mute_until') or 0), 'roots': self.settings['roots'], 'instant': self.instant,
                 'interval': self.settings['interval'], 'uptime': time.time() - self.started}
 
-    def event_dict(self, eid=None, row=None):
+    def event_dict(self, eid=None, row=None, memo=None):
+        """One change as the window shows it. ``memo`` (a dict shared by one request) remembers what the disk
+        said about each path and version, so a list asks once per distinct one (2.7.0 O8)."""
         r = row if row is not None else self.store.q('SELECT * FROM events WHERE id=?', (eid,))[0]
+        if memo is None:
+            memo = {}
         d = dict(r)
         root = self.root_of(d['path'])
         d['name'] = os.path.basename(d['path'])
@@ -1260,9 +1274,13 @@ class Monitor:
         if d['rel_dir'] == '.':
             d['rel_dir'] = ''
         d['root_name'] = os.path.basename(root.rstrip(os.sep)) if root else ''
-        d['has_blob'] = self.store.has_blob(d['hash'])
-        d['has_prev_blob'] = self.store.has_blob(d['prev_hash'])
-        d['exists'] = os.path.exists(d['path'])
+        for k, h in (('has_blob', d['hash']), ('has_prev_blob', d['prev_hash'])):
+            if ('b', h) not in memo:
+                memo[('b', h)] = self.store.has_blob(h)
+            d[k] = memo[('b', h)]
+        if ('p', d['path']) not in memo:
+            memo[('p', d['path'])] = os.path.exists(d['path'])
+        d['exists'] = memo[('p', d['path'])]
         d['flags'] = [f for f in (d['flags'] or '').split(',') if f]
         d['starred'] = d['path'] in self.stars
         d['pinned'] = is_pinned(d['path'])
@@ -1271,6 +1289,7 @@ class Monitor:
 
 
 def diff_counts(a, b):
+    import difflib  # 2.7.0 O5: imported on first use
     sm = difflib.SequenceMatcher(None, a, b, autojunk=len(a) + len(b) > 4000)
     added = removed = 0
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
@@ -1322,6 +1341,7 @@ footer {{ color:var(--mute); font-size:12px; padding:16px 24px; }}
 
 
 def build_diff(a, b, context=3, max_lines=6000):
+    import difflib
     sm = difflib.SequenceMatcher(None, a, b, autojunk=len(a) + len(b) > 4000)
     hunks, shown, truncated = [], 0, False
     for group in sm.get_grouped_opcodes(context):
@@ -1348,6 +1368,7 @@ def build_diff(a, b, context=3, max_lines=6000):
 
 
 def inline_segments(x, y):
+    import difflib
     sm = difflib.SequenceMatcher(None, x, y, autojunk=False)
     if sm.ratio() < 0.3:
         return None, None
@@ -1374,8 +1395,7 @@ def save_scan(sc):
         sizes = {d: v[0] for d, v in sc.dirs.items() if v[0] >= GROWTH_KEEP}
         App.store.x('INSERT OR REPLACE INTO scan_history(drive, serial, finished, sizes) VALUES(?,?,?,?)',
                     (sc.root, sc.serial, sc.finished, zlib.compress(json.dumps(sizes).encode('utf-8'), 6)))
-        App.store.x('DELETE FROM scan_history WHERE drive=? AND finished NOT IN '
-                    '(SELECT finished FROM scan_history WHERE drive=? ORDER BY finished DESC LIMIT 30)', (sc.root, sc.root))
+        insights.thin_history(App.store, sc.root)  # 2.7.0 S1.1: one per day for 90 days (was: the last 30 scans)
 
 
 GROWTH_KEEP = 50 * 2 ** 20   # folders of 50 MB or more are remembered per full scan for the radar
@@ -1437,7 +1457,23 @@ def quick_folders(d):
             if f and cleaner.drive_of(f) == d and not any(under(f, g) and f != g for g in [os.environ.get('USERPROFILE', '')] + list(App.mon.settings['roots']))]
 
 
+def note_extra(sc):
+    """The system drive's scan also noted bad names, compressible files, language packs and Git repositories (2.7.0 O3)."""
+    if sc.root == cleaner.system_drive() and getattr(sc, 'extra', None):
+        cleaner._last_extra['scan'] = sc
+        cleaner._compressible['at'] = 0
+
+
+def extra_list(kind, walk):
+    """``kind`` as the system drive's kept scan noted it, else walked for (the scan predates 2.7.0, or was quick)."""
+    d = cleaner.system_drive()
+    sc = _scans.get(d) or load_scan(d)
+    got = cleaner.scan_extra(kind, sc) if sc else None
+    return walk() if got is None else got
+
+
 def scan_finished(sc):
+    note_extra(sc)
     save_scan(sc)
 
     def shared():  # WinSxS hard links, afterwards and in the background, then kept too
@@ -1450,8 +1486,11 @@ def scan_finished(sc):
 
 def start_scan(d, mode=None, priority=True):
     mode = mode if mode in ('quick', 'full') else ('quick' if cleaner.is_hdd(d) else 'full')
+    prev = _scans.get(d) or load_scan(d)
+    expect = prev.files if prev and prev.mode == mode and prev.state != 'scanning' else None  # 2.7.0 M1-7
     _scans[d] = cleaner.DriveScan(d, None if priority else background_thread, mode=mode, folders=quick_folders(d),
                                   priority=priority, on_done=scan_finished)
+    _scans[d].expect = expect
     _scan_notes.pop(d, None)
     find_cleanable(d)
 
@@ -1573,13 +1612,18 @@ def clean_drive(d):
     return d if any(x['drive'] == d for x in cleaner.drives()) else None
 
 
-def find_cleanable(drive):
+RECYCLED_PLACES = {'brokenlinks', 'oldinstallers', 'installers'}  # places whose files go to the Recycle Bin (and can come back)
+
+
+def find_cleanable(drive, refresh=True):
+    """Work out the cleanable places of ``drive`` in the background. ``refresh``: True reads every place; a set
+    of place ids only those (the rest as last read, under 10 minutes old) (2.7.0 O1)."""
     _cleanable[drive] = {'state': 'scanning', 'items': (_cleanable.get(drive) or {}).get('items')}
 
     def work():
         background_thread()
         try:
-            _cleanable[drive] = {'state': 'done', 'items': cleaner.cleanable(drive)}
+            _cleanable[drive] = {'state': 'done', 'items': cleaner.cleanable(drive, refresh)}
         except Exception as e:
             _cleanable[drive] = {'state': 'failed', 'items': [], 'error': repr(e)}
     threading.Thread(target=work, daemon=True, name='cleanable').start()
@@ -1617,11 +1661,14 @@ def disk_low():
     return _disk['low']
 
 
-def recompress_old(store, limit=3000):
+def recompress_old(store, limit=3000, blobs=None):
     """Compress snapshots kept before 2.4.0, a batch per upkeep run, at background priority: each is
     replaced in one step (os.replace), and only when it really gets smaller and reads back the same."""
     done = 0
-    for h, size, _, path in iter_blobs():
+    if store is not None and store.meta('recompressed_all'):  # everything kept before 2.4.0 has been looked at (2.7.0 O6)
+        return 0
+
+    for h, size, _, path in (blobs if blobs is not None else iter_blobs()):
         if done >= limit:
             break
         if size < 4096 or size > 64 * 2 ** 20:
@@ -1641,14 +1688,16 @@ def recompress_old(store, limit=3000):
             done += 1
         except (OSError, SnapshotError):
             continue
+    if done < limit and store is not None:
+        store.set_meta('recompressed_all', True)  # nothing left to compress: later runs skip the read of every first 4 bytes
     return done
 
 
-def verify_blobs(store, limit=2000):
+def verify_blobs(store, limit=2000, blobs=None):
     """Read kept versions back, a batch per upkeep run at background priority, and check that each one's
     content still matches its name (SHA-1 or SHA-256) (2.6.0 #43). A damaged one is reported in Diagnostics
     and in the warning bar; it is never "repaired" by guessing. The next batch starts where this one ended."""
-    names = sorted(h for h, _, _, _ in iter_blobs())
+    names = sorted(h for h, _, _, _ in (blobs if blobs is not None else iter_blobs()))  # one sort per run, of the shared listing
     if not names:
         return
     start = store.meta('verify_at', '')
@@ -1813,6 +1862,15 @@ def apply_pending_import():
         DATA.rename(keep)
     pend.rename(DATA)
     print(f'imported history applied; the previous one is kept in {keep}')
+
+
+def blob_count():
+    """How many versions are kept: from the last upkeep's listing if under 10 minutes old (2.7.0 O6)."""
+    n, at = getattr(App, 'blob_count', (None, 0))
+    if n is None or time.time() - at > 600:
+        n = sum(1 for _ in iter_blobs())
+        App.blob_count = (n, time.time())
+    return n
 
 
 def iter_blobs():
@@ -2163,6 +2221,7 @@ class Handler(BaseHTTPRequestHandler):
         return 'dw' in jar and secrets.compare_digest(jar['dw'].value, TOKEN)
 
     def send_json(self, obj, code=200):
+        self._resp = obj  # what this request answered (the action log reads it, 2.7.0 F1)
         body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -2251,7 +2310,8 @@ class Handler(BaseHTTPRequestHandler):
             if route == '/api/lineage':  # versions and the copies made from them (2.6.0 #38)
                 return self.send_json(lineage(qs.get('path', '')))
             if route == '/api/history':
-                return self.send_json([App.mon.event_dict(row=r) for r in file_history(qs['path'])])
+                memo = {}
+                return self.send_json([App.mon.event_dict(row=r, memo=memo) for r in file_history(qs['path'])])
             if route == '/api/file-info':
                 return self.send_json(self.file_info(qs.get('path', '')))
             if route == '/api/duplicates':
@@ -2271,7 +2331,7 @@ class Handler(BaseHTTPRequestHandler):
                 App.leftovers = cleaner.leftovers(sizes) if sizes else []
                 return self.send_json({'ok': True, 'ready': bool(sizes), 'items': App.leftovers})
             if route == '/api/clean/git':  # large Git repositories (2.6.0 #29)
-                App.git_repos = cleaner.git_repos()
+                App.git_repos = extra_list('git', cleaner.git_repos)
                 return self.send_json({'items': App.git_repos, 'git': bool(shutil.which('git'))})
             if route == '/api/relocate':  # progress of a folder move, and the folders moved so far (2.6.0 #3)
                 return self.send_json({**App.move, 'moves': App.store.meta('moves', [])})
@@ -2285,9 +2345,9 @@ class Handler(BaseHTTPRequestHandler):
                 m = cleaner.chat_media(a['data'], max(7, int(qs.get('days', 90))))
                 return self.send_json({'ok': True, 'kinds': {k: {'n': len(v), 'size': sum(x[1] for x in v)} for k, v in m.items()}})
             if route == '/api/clean/locales':  # programs' language packs, listed only (2.6.0 #27)
-                return self.send_json({'items': cleaner.language_packs()})
+                return self.send_json({'items': extra_list('locales', cleaner.language_packs)})
             if route == '/api/clean/badnames':  # names Windows cannot handle (2.6.0 #35)
-                App.badnames = cleaner.bad_names()
+                App.badnames = extra_list('bad', cleaner.bad_names)
                 return self.send_json({'items': App.badnames})
             if route == '/api/clean/cloud':  # synced folders: on this PC vs online-only (2.6.0 #30)
                 return self.send_json({'items': cleaner.cloud_overview()})
@@ -2311,14 +2371,16 @@ class Handler(BaseHTTPRequestHandler):
                     kept = load_scan(d)  # opens at once on the last scan (2.4.0 §3)
                     if kept:
                         _scans[d] = kept
+                        note_extra(kept)
                         if d not in _cleanable:
-                            find_cleanable(d)
+                            find_cleanable(d, set())  # places read less than 10 minutes ago are not read again (2.7.0 O1)
                 sc, cl = _scans.get(d), _cleanable.get(d) or {}
                 usage = next((x for x in cleaner.drives() if x['drive'] == d), {})
                 out = {'ok': True, 'drive': d, 'usage': usage, 'items': cl.get('items'), 'items_state': cl.get('state'),
                        'note': _scan_notes.get(d), 'hdd': cleaner.is_hdd(d), 'quick_default': cleaner.is_hdd(d)}
                 if sc:
                     out.update(sc.summary(qs.get('folder') or None) if sc.state != 'scanning' else sc.progress())
+                    out['expect_files'] = getattr(sc, 'expect', None)
                 return self.send_json(out)
             if route == '/api/restore-plan':  # where a restore would go, before it happens (2.3.0, review P0-2)
                 r = App.store.q('SELECT * FROM events WHERE id=?', (int(qs.get('id', 0)),))
@@ -2332,7 +2394,8 @@ class Handler(BaseHTTPRequestHandler):
                     c = App.mon.confirmed.get(target)
                 return self.send_json({'ok': App.store.has_blob(h), 'target': target, 'exists': exists,
                                        'copy': restore_copy_name(target, qs.get('lang')) if exists else None,
-                                       'can_replace': bool(exists and c and c[2] and App.store.has_blob(c[2])),
+                                       'can_replace': bool(exists),  # 2.7.0 F7: the current content is kept first
+                                       'current_kept': bool(exists and c and c[2] and App.store.has_blob(c[2])),
                                        'note': App.mon.notes.get(r['id']), 'ts': r['ts']})
             if route == '/api/backup':  # progress of a history backup
                 return self.send_json(App.backup)
@@ -2378,6 +2441,8 @@ class Handler(BaseHTTPRequestHandler):
                 if self.allowed_path(p) and os.path.isfile(p):
                     return self.send_file(p, os.path.basename(p))
                 return self.send_json({'error': 'not found'}, 404)
+            if features.get_route(self, route, qs):  # 2.7.0
+                return
             return self.send_json({'error': 'not found'}, 404)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
@@ -2391,8 +2456,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok() or self.headers.get('X-Token') != TOKEN:
             return self.send_json({'error': 'forbidden'}, 403)
         route = urllib.parse.urlparse(self.path).path
+        self._resp, self._body = None, {}
         try:
-            b = self.body()
+            return self._post(route)
+        finally:
+            features.after_post(self, route, self._body if isinstance(self._body, dict) else {})
+
+    def _post(self, route):
+        try:
+            b = self._body = self.body()
             if route == '/api/open':
                 p = b['path']
                 if not self.allowed_path(p) or not os.path.exists(p):
@@ -2423,7 +2495,15 @@ class Handler(BaseHTTPRequestHandler):
                 stem, ext = os.path.splitext(name)
                 label = time.strftime('%Y-%m-%d %H.%M', time.localtime(float(b.get('ts') or time.time())))
                 if route == '/api/restore-as':
-                    dest = pick_save(f'{stem} ({label}){ext}', b.get('dir') or '')
+                    folder = features.save_target(b)  # 2.7.0 M2-18: a chosen place, or None for the dialog
+                    if b.get('target') in ('desktop', 'beside', 'downloads') and not folder:
+                        return self.send_json({'ok': False, 'code': 'notAllowed'})  # never a dialog instead of what was asked
+                    if folder:
+                        dest, n = os.path.join(folder, f'{stem} ({label}){ext}'), 2
+                        while os.path.exists(long_path(dest)):
+                            dest, n = os.path.join(folder, f'{stem} ({label}) ({n}){ext}'), n + 1
+                    else:
+                        dest = pick_save(f'{stem} ({label}){ext}', b.get('dir') or '')
                     if not dest:
                         return self.send_json({'ok': False, 'cancelled': True})
                 else:
@@ -2490,7 +2570,7 @@ class Handler(BaseHTTPRequestHandler):
                 paths = [os.path.normpath(str(x)) for x in (b.get('paths') or [])][:5000]
                 r = cleaner.recycle_restore(paths, float(b.get('since') or 0))
                 for d in {cleaner.drive_of(x) for x in r['restored']}:
-                    find_cleanable(d)
+                    find_cleanable(d, RECYCLED_PLACES)
                 return self.send_json(r)
             if route == '/api/clean/app':  # open a chat app so its own storage cleanup can be used (2.4.0 §5)
                 a = next((x for x in cleaner.chat_apps() if x['id'] == b.get('id')), None)
@@ -2517,7 +2597,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not d:
                     return self.send_json({'ok': False, 'code': 'notAllowed'})
                 r = cleaner.clean(d, str(b.get('id', '')), recycle)
-                find_cleanable(d)
+                find_cleanable(d, {str(b.get('id', ''))})  # only the place cleaned (and the Recycle Bin) (2.7.0 O1)
                 note_last_clean(r.get('recycled') or [], r.get('freed') or 0)
                 milestone('freed', r.get('freed') or 0)
                 return self.send_json({'ok': 'code' not in r, **r})
@@ -2529,7 +2609,7 @@ class Handler(BaseHTTPRequestHandler):
                 left = [p for p in last['paths'] if p not in set(r['restored'])]
                 App.store.set_meta('last_clean', {**last, 'paths': left} if left and len(left) < len(last['paths']) else None)
                 for dr in {cleaner.drive_of(x) for x in r['restored']}:
-                    find_cleanable(dr)
+                    find_cleanable(dr, RECYCLED_PLACES)
                 return self.send_json(r)
             if route == '/api/mass-restore':  # put every file of a mass change back as it was before (2.6.0 #6)
                 m = App.mon.mass or {}
@@ -2560,7 +2640,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({'ok': True, 'restored': done, 'failed': failed})
             if route == '/api/mass-dismiss':
                 App.mon.mass, App.mon._burst = None, []
-                App.mon.mass_quiet = time.time() + 600  # "that was me": no new alert for 10 minutes (Gemini 2.6.0 Q-1)
+                App.mon.mass_quiet = time.time() + trust.mass_quiet_seconds()  # "that was normal": 10 min / 1 h / 24 h (2.7.0 F6)
                 return self.send_json({'ok': True})
             if route == '/api/folder-at':  # a folder as it was at a time, as a copy (2.6.0 #31)
                 return self.send_json(self.folder_at(str(b.get('folder', '')), float(b.get('ts') or 0), b.get('lang')))
@@ -2715,7 +2795,7 @@ class Handler(BaseHTTPRequestHandler):
                 sc = _scans.get(cleaner.drive_of(path))
                 r = cleaner.delete_file(path, sc, recycle, permanent=bool(b.get('permanent')))
                 if r.get('ok'):
-                    find_cleanable(cleaner.drive_of(path))  # the Recycle Bin grew
+                    find_cleanable(cleaner.drive_of(path), set())  # only the Recycle Bin grew (2.7.0 O1: all places were read again)
                     if r.get('recycled'):
                         note_last_clean([path], r.get('size') or 0)
                 return self.send_json(r)
@@ -2792,14 +2872,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({'ok': True, 'mute_until': App.mon.settings.get('mute_until', 0)})
             if route == '/api/note':
                 eid, text = int(b['id']), str(b.get('text') or '').strip()[:500]
-                if text:
-                    App.store.x('INSERT OR REPLACE INTO notes(event_id, text, ts) VALUES(?,?,?)', (eid, text, time.time()))
-                    App.mon.notes[eid] = text
-                else:
-                    App.store.x('DELETE FROM notes WHERE event_id=?', (eid,))
-                    App.mon.notes.pop(eid, None)
-                App.hub.publish({'type': 'update', 'event': App.mon.event_dict(eid)})
-                return self.send_json({'ok': True, 'note': text})
+                label = b.get('label') if b.get('label') in features.NOTE_LABELS else None  # colour label (2.7.0 M1-15)
+                features.set_note(eid, text, label)
+                return self.send_json({'ok': True, 'note': text, 'label': label})
             if route == '/api/ignore-folder':
                 p = os.path.normpath(b.get('path', ''))
                 if not any(under(p, r) for r in App.mon.settings['roots']):
@@ -2875,6 +2950,8 @@ class Handler(BaseHTTPRequestHandler):
                 App.storage['at'] = 0
                 App.hub.publish({'type': 'cleared'})
                 return self.send_json({'ok': True})
+            if features.post_route(self, route, b):  # 2.7.0
+                return
             return self.send_json({'error': 'not found'}, 404)
         except Exception as e:
             return self.send_json({'ok': False, 'error': f'{type(e).__name__}: {e}'}, 500)
@@ -2946,7 +3023,8 @@ class Handler(BaseHTTPRequestHandler):
         sql = 'SELECT * FROM events' + (' WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY id DESC LIMIT ?'
         limit = min(int(qs.get('limit', 150)), 500)
         rows = App.store.q(sql, args + [limit])
-        return {'events': [App.mon.event_dict(row=r) for r in rows], 'more': len(rows) == limit}
+        memo = {}
+        return {'events': [App.mon.event_dict(row=r, memo=memo) for r in rows], 'more': len(rows) == limit}
 
     def stats(self):
         st = App.store
@@ -3158,7 +3236,7 @@ class Handler(BaseHTTPRequestHandler):
                 'events': st.q('SELECT COUNT(*) n FROM events')[0]['n'], 'notes': len(mon.notes), 'stars': len(mon.stars),
                 'indexed': st.q('SELECT COUNT(*) n FROM ftsdoc')[0]['n'] if st.fts else None,
                 'db_bytes': sum(f.stat().st_size for f in DATA.glob('watch.db*')),
-                'snapshots': sum(1 for _ in iter_blobs()), 'errors': errors, 'integrity': App.integrity, 'warn': mon.warnings(),
+                'snapshots': blob_count(), 'errors': errors, 'integrity': App.integrity, 'warn': mon.warnings(),
                 'blobs_bad': len(App.store.meta('blobs_bad', [])), 'verify_last': App.store.meta('verify_last', 0),
                 'snap_format': SNAP_FORMAT}
 
@@ -3173,6 +3251,7 @@ class Handler(BaseHTTPRequestHandler):
                   r['path'], r['old_path'] or '', r['old_size'], None if r['kind'] == 'deleted' else r['size'],
                   r['added'], r['removed'], summary_text(r, lang), App.mon.notes.get(r['id'], '')] for r in rows]
         cols = ('x_time', 'x_change', 'x_file', 'x_folder', 'x_path', 'x_old', 'x_before', 'x_after', 'x_added', 'x_removed', 'x_summary', 'x_note')
+        import xlsx  # 2.7.0 O5
         data = xlsx.write_xlsx([T[c] for c in cols], table, widths=[20, 10, 34, 44, 64, 40, 15, 15, 9, 9, 30, 36], sheet=T['x_sheet'])
         name = f"{T['app']} {T['x_sheet']} {time.strftime('%Y-%m-%d')}.xlsx"
         self.send_bytes(data, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -3194,6 +3273,7 @@ class Handler(BaseHTTPRequestHandler):
             cols = [T['x_file'], T['x_folder'], T['xd_mb'], T['xd_modified']]
             rows = [[f['name'], f['dir'], mb(f['size']), when(f['mtime'])] for f in (d['stale'] if qs.get('stale') else d['big'])]
             widths, sheet = [40, 64, 12, 20], T['xs_sheet']
+        import xlsx
         data = xlsx.write_xlsx(cols, rows, widths=widths, sheet=sheet)
         name = f"{T['app']} {sheet} {time.strftime('%Y-%m-%d')}.xlsx"
         self.send_bytes(data, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -3365,16 +3445,15 @@ class Handler(BaseHTTPRequestHandler):
             return {'ok': False, 'code': 'noSnapshot'}
         target = r['old_path'] if r['kind'] == 'renamed' and b.get('version') == 'prev' else r['path']
         if b.get('replace') and os.path.isfile(target):  # roll the file itself back (2.0.1) — only if its current
-            with App.mon.lock:                          # content is kept, so this can be undone the same way
-                c = App.mon.confirmed.get(target)
-            if not (c and c[2] and App.store.has_blob(c[2])):
-                return {'ok': False, 'code': 'noBackup'}
+            refused = trust.keep_current_first(target, bool(b.get('force')))  # 2.7.0 F7: keep it now if it is not kept yet
+            if refused:
+                return {'ok': False, 'code': refused, 'path': target}
             try:
                 App.store.copy_blob(h, target)
             except RestoreError as e:
                 return {'ok': False, 'code': e.code, 'path': target, 'by': cleaner.lockers(target) if e.code == 'inUse' else []}
             milestone('restored', 1)
-            return {'ok': True, 'path': target, 'replaced': True}
+            return {'ok': True, 'path': target, 'replaced': True, 'before_kept': True}
         if os.path.exists(long_path(target)):
             target = restore_copy_name(target, b.get('lang'))
         os.makedirs(long_path(os.path.dirname(target)), exist_ok=True)
@@ -3470,6 +3549,7 @@ class Handler(BaseHTTPRequestHandler):
             new['prescan'] = bool(b['prescan'])
         if 'milestones' in b:
             new['milestones'] = bool(b['milestones'])  # 2.6.0 #50
+        features.update_settings_extra(b, new)  # 2.7.0 preferences
         scope_changed = any(new.get(k) != s.get(k) for k in ('roots', 'exclude_exts', 'exclude_names', 'exclude_dirs', 'exclude_paths'))
         with App.mon.lock:
             removed_roots = set(s['roots']) - set(new['roots'])
@@ -3627,11 +3707,19 @@ for _lang, _extra in {
     'en': {'pause_indef': 'Until I resume', 'pause_30': 'For 30 minutes', 'pause_120': 'For 2 hours',
            'tip_paused_until': 'DeskTrace — paused until {t}', 'mute_60': 'Mute for 1 hour',
            'mute_tomorrow': 'Mute until 8:00 tomorrow', 'unmute': 'Unmute (muted until {t})',
-           'shell_label': 'DeskTrace: show history', 'shell_deleted': 'DeskTrace: deleted files here'},
+           'shell_label': 'DeskTrace: show history', 'shell_deleted': 'DeskTrace: deleted files here',
+           'tip_free': '{d} free: {free}', 'low_title': 'Low disk space', 'low_text': 'Only {free} left on the drive with your history. Click to free some space.',
+           'n_sw_deleted': 'Deleted or overwritten files', 'n_sw_lowdisk': 'Low disk space', 'n_sw_changes': 'Ordinary changes',
+           'wk_title': 'Your week with DeskTrace', 'wk_text': '{v} versions kept, {r} restores, {f} freed. Click for the report.',
+           'ac_title': 'Scheduled cleanup done', 'ac_text': '{f} freed from {n} places you chose (caches and temporary files only).'},
     'zh': {'pause_indef': '直到手动继续', 'pause_30': '30 分钟', 'pause_120': '2 小时',
            'tip_paused_until': '桌迹 — 已暂停，{t} 自动继续', 'mute_60': '静音 1 小时',
            'mute_tomorrow': '静音到明早 8:00', 'unmute': '取消静音（原定静音到 {t}）',
-           'shell_label': '桌迹：查看历史版本', 'shell_deleted': '桌迹：找回这里删除的文件'},
+           'shell_label': '桌迹：查看历史版本', 'shell_deleted': '桌迹：找回这里删除的文件',
+           'tip_free': '{d} 可用：{free}', 'low_title': '磁盘空间不足', 'low_text': '保存历史记录的磁盘只剩 {free}。点击释放空间。',
+           'n_sw_deleted': '删除或覆盖文件', 'n_sw_lowdisk': '磁盘空间不足', 'n_sw_changes': '普通修改',
+           'wk_title': '桌迹本周保护周报', 'wk_text': '保存了 {v} 个版本，恢复 {r} 次，释放 {f}。点击查看周报。',
+           'ac_title': '定时清理已完成', 'ac_text': '从你选择的 {n} 处释放了 {f}（仅缓存和临时文件）。'},
 }.items():
     TEXT[_lang].update(_extra)
 for _lang, _extra in {
@@ -3879,6 +3967,11 @@ def set_shell_menu(on):
                 winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
             except OSError:
                 pass
+    try:  # 2.7.0 M2-25: tell Explorer the menu changed (SHCNE_ASSOCCHANGED), no restart of Explorer needed
+        import ctypes
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+    except Exception:
+        pass
     return shell_menu_enabled()
 
 
@@ -3932,6 +4025,7 @@ def open_window(fragment='', port=None, token=None, pid=None):
             return 'edge'
     except Exception as e:
         print('window:', repr(e))
+    import webbrowser
     webbrowser.open(url + (fragment or ''))
     return 'browser'
 
@@ -4021,6 +4115,7 @@ def background_thread():
         k32 = ctypes.windll.kernel32
         k32.GetCurrentThread.restype = ctypes.c_void_p
         k32.SetThreadPriority(ctypes.c_void_p(k32.GetCurrentThread()), 0x00010000)  # THREAD_MODE_BACKGROUND_BEGIN
+        features.eco_qos_thread()  # 2.7.0 M2-26
     except Exception as e:
         print('background mode:', repr(e))
 
@@ -4158,6 +4253,7 @@ def start_tray():
         return None
     t = traymod.Tray(STATIC / 'icon.ico', STATIC / 'icon-paused.ico', tray_command, tray_menu, commands=TRAY_COMMANDS)
     t.state_icons = {'busy': STATIC / 'icon-busy.ico', 'alert': STATIC / 'icon-alert.ico'}  # 2.6.0 #45
+    t.hotkey_spec = App.mon.settings.get('hotkey', 'ctrl+alt+z')  # 2.7.0 M2-22
     if not t.start():
         print('tray icon could not be added')
         return None
@@ -4190,7 +4286,7 @@ def make_shortcut(lnk, args, description):
 def set_autostart(on):
     if on:
         STARTUP_LNK.parent.mkdir(parents=True, exist_ok=True)
-        make_shortcut(STARTUP_LNK, '--no-browser', f'{APP_NAME} - starts file monitoring in the background')
+        make_shortcut(STARTUP_LNK, '--autostart', f'{APP_NAME} - starts file monitoring in the background')
     elif STARTUP_LNK.exists():
         STARTUP_LNK.unlink()
     return STARTUP_LNK.exists()
@@ -4372,7 +4468,10 @@ def main():
     ap.add_argument('--show', metavar='FILE', help="open the page at this file's history (Explorer's right-click entry)")
     ap.add_argument('--show-deleted', metavar='FOLDER', help='open the files deleted in this folder (Explorer, 2.6.0 #4)')
     ap.add_argument('--quit', action='store_true', help='stop the running instance cleanly (used by the installer)')
+    ap.add_argument('--autostart', action='store_true', help='started with Windows: no window at all (2.7.0 M1-17)')
     args = ap.parse_args()
+    if args.autostart:
+        args.no_browser = True
     if args.data:
         DATA = Path(args.data).resolve()
         BLOBS, SETTINGS_FILE, INSTANCE_FILE = DATA / 'blobs', DATA / 'settings.json', DATA / 'instance.json'
@@ -4476,6 +4575,9 @@ def main():
         pass
     print(f'--- {time.strftime("%Y-%m-%d %H:%M:%S")} stopped')
 
+
+features.install(globals())  # the 2.7.0 features (features.py)
+trust.install(globals())     # DeepSeek's 2.8.0 proposal, in 2.7.0 (trust.py)
 
 if __name__ == '__main__':
     main()

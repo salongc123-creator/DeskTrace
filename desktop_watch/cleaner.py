@@ -485,6 +485,90 @@ def compressed_size(path):
     return None if lo == 0xFFFFFFFF and ctypes.GetLastError() else (hi.value << 32) + lo
 
 
+def new_extra():
+    return {'bad': [], 'compress': [], 'locales': [], 'git': []}
+
+
+def extra_context():
+    home = env('USERPROFILE')
+    return {'home': os.path.normcase(home).rstrip('\\') + '\\' if home else None, 'home_raw': home,
+            'progs': [os.path.normcase(b).rstrip('\\') + '\\' for b in known_dirs()['programs'] + [os.path.join(env('LOCALAPPDATA'), 'Programs')] if b],
+            'old': time.time() - 90 * 86400}
+
+
+def _extra_where(ctx, d):
+    """What a drive scan notes in folder ``d`` on the way, with the same limits as the separate walks had:
+    in the user folder (AppData, OneDrive and hidden folders left out) bad names (12 levels), compressible
+    files (8) and Git repositories (6); a "locales" folder up to 4 levels into Program Files."""
+    n = os.path.normcase(d).rstrip('\\') + '\\'
+    out = {}
+    home = ctx['home']
+    if home and n.startswith(home):
+        rel = [p for p in n[len(home):].split('\\') if p]
+        if not any(p.startswith('.') for p in rel) and not (rel and rel[0] in ('appdata', 'onedrive')):
+            depth = len(rel)
+            out.update(bad=depth <= 12, compress=depth <= 8, git=depth <= 6 and not any(p in DEV_DEPS for p in rel))
+    if os.path.basename(n[:-1]) == 'locales':
+        for b in ctx['progs']:
+            if n.startswith(b) and n[len(b):].count('\\') <= 5:
+                out['locales'] = b
+    return out if any(out.values()) else None
+
+
+def _extra_entry(sc, where, d, e, st, attrs):
+    if where.get('bad'):
+        p = os.path.join(d, e.name)
+        why = 'trailing' if e.name != e.name.rstrip(' .') else 'long' if len(p) >= 260 else None
+        if why:
+            sc.extra['bad'].append({'path': p, 'name': e.name, 'why': why, 'dir': bool(attrs & 0x10)})
+    if attrs & 0x10:
+        if where.get('git') and e.name == '.git' and not attrs & REPARSE:
+            sc.extra['git'].append(d)
+        return
+    if (where.get('compress') and st.st_size >= 20 * 2 ** 20 and st.st_mtime < sc._ctx['old']
+            and os.path.splitext(e.name)[1].lower() in COMPRESSIBLE and not attrs & (COMPRESSED | SPARSE | ONLINE_ONLY | REPARSE)):
+        sc.extra['compress'].append(e.path)
+
+
+_last_extra = {}   # what the last finished scan of the system drive noted (2.7.0 O3); set by the service
+
+
+def scan_extra(kind, sc):
+    """One of the lists a finished scan ``sc`` collected on the way, or None when the scan did not cover it
+    (a quick scan reads no Program Files; scans kept before 2.7.0 have none)."""
+    x = getattr(sc, 'extra', None)
+    if not x or sc.state not in ('done',):
+        return None
+    if sc.mode != 'full':
+        home = env('USERPROFILE')
+        if kind == 'locales' or not any(os.path.normcase(f) == os.path.normcase(home) for f in sc.folders):
+            return None
+    if kind == 'bad':
+        return [b for b in x['bad'] if os.path.lexists('\\\\?\\' + b['path'])]
+    if kind == 'compress':
+        out = []
+        for p in x['compress']:
+            try:
+                if not os.stat(p).st_file_attributes & COMPRESSED:
+                    out.append(p)
+            except (OSError, AttributeError):
+                pass
+        return out
+    if kind == 'locales':
+        return sorted(x['locales'], key=lambda i: -i['size'])
+    if kind == 'git':
+        repos = sorted(set(x['git']))
+        repos = [r for r in repos if not any(r != o and inside(r, o) for o in repos)]  # not a repository's own folders
+        out = []
+        for r in repos:
+            g = os.path.join(r, '.git')
+            size = sc.dirs.get(g, (0, 0))[0]
+            if size >= 300 * 2 ** 20:
+                out.append({'path': r, 'name': os.path.basename(r), 'size': size})
+        return sorted(out, key=lambda i: -i['size'])
+    return None
+
+
 class DriveScan:
     """One read-only walk of a drive (or, quick, of your own folders on it): what every folder takes on
     the disk, the biggest files and the space by type. 2.4.0: sizes are disk usage (whole clusters; real
@@ -509,6 +593,8 @@ class DriveScan:
         self.cached_at = None
         self.stop = False
         self._lock = threading.Lock()
+        self.extra = new_extra()        # found on the way (2.7.0 O3): bad names, compressible files, language packs, Git
+        self._ctx = extra_context()
         if start:
             threading.Thread(target=self.run, daemon=True, name='drive-scan').start()
 
@@ -559,6 +645,7 @@ class DriveScan:
         with self._lock:
             self.files = self.bytes = self.skipped = self.online = self.tiny = 0
             self.dirs, self.kids, self.big, self.types = {}, {}, [], {}
+            self.extra = new_extra()
 
     def _parallel(self, top, workers):
         """Read ``top`` with ``workers`` separate Python processes sharing one queue of folders (2.5.0).
@@ -651,6 +738,8 @@ class DriveScan:
                         heapq.heapreplace(self.big, b)
                 self.online += o['online']
                 self.skipped += o['skipped']
+                for k, v in (o.get('extra') or {}).items():
+                    self.extra.setdefault(k, []).extend(v)
                 self.tiny += o.get('tiny', 0)
         # the listed folders add up from the bottom: deepest first
         total = dict(walked)
@@ -702,6 +791,8 @@ class DriveScan:
             return 0, 0, []
         cl = self.cluster
         floor = self.big[0][0] if len(self.big) >= TOP_FILES else -1  # only files that can make the list
+        where = _extra_where(self._ctx, d)  # what to look out for in this folder (2.7.0 O3)
+        locale_other = 0
         with it:
             for e in it:
                 try:
@@ -709,6 +800,10 @@ class DriveScan:
                 except OSError:
                     continue
                 attrs = st.st_file_attributes
+                if where:
+                    _extra_entry(self, where, d, e, st, attrs)
+                    if where.get('locales') and e.name.lower().endswith('.pak') and not e.name.lower().startswith(KEEP_LOCALES):
+                        locale_other += st.st_size
                 if attrs & 0x10:  # a folder
                     if not attrs & REPARSE:
                         subdirs.append(e.path)
@@ -734,6 +829,9 @@ class DriveScan:
                 types[ext] = types.get(ext, 0) + used
                 if used > floor:
                     big.append((used, e.path, st.st_mtime, size))
+        if locale_other >= 20 * 2 ** 20:
+            self.extra['locales'].append({'path': d, 'program': ' / '.join(os.path.relpath(d, where['locales']).split(os.sep)[:2]),
+                                          'size': locale_other})
         with self._lock:
             for k, v in types.items():
                 self.types[k] = self.types.get(k, 0) + v
@@ -863,7 +961,7 @@ class DriveScan:
     def to_dict(self):
         return {'root': self.root, 'mode': self.mode, 'folders': self.folders, 'serial': self.serial, 'finished': self.finished,
                 'files': self.files, 'bytes': self.bytes, 'skipped': self.skipped, 'online': self.online, 'shared': self.shared,
-                'tiny': self.tiny, 'cluster': self.cluster,
+                'tiny': self.tiny, 'cluster': self.cluster, 'extra': self.extra,
                 'dirs': [[d, s, n] for d, (s, n) in self.dirs.items()], 'kids': self.kids, 'big': self.big,
                 'types': self.types, 'seconds': round((self.finished or time.time()) - self.started, 1)}
 
@@ -879,6 +977,7 @@ class DriveScan:
         sc.kids, sc.types = d['kids'], d['types']
         sc.big = [tuple(b) for b in d['big']]
         heapq.heapify(sc.big)
+        sc.extra = d.get('extra')  # None: kept before 2.7.0, the lists are walked for as before
         sc._exact = True
         return sc
 
@@ -935,13 +1034,11 @@ def _scan_worker():
         sys.stdout.write(json.dumps(m) + '\n')
         sys.stdout.flush()
     out = {'t': 'R', 'dirs': [[d, list(v)] for d, v in sc.dirs.items()], 'kids': sc.kids, 'types': sc.types,
-           'big': [list(b) for b in sc.big], 'online': sc.online, 'skipped': sc.skipped, 'tiny': sc.tiny}
+           'big': [list(b) for b in sc.big], 'online': sc.online, 'skipped': sc.skipped, 'tiny': sc.tiny, 'extra': sc.extra}
     sys.stdout.write(json.dumps(out) + '\n')
     sys.stdout.flush()
 
 
-if __name__ == '__main__' and '--scan-worker' in __import__('sys').argv:
-    _scan_worker()
 
 
 # ----------------------------------------------------------------------------------------------- consequences
@@ -1185,6 +1282,14 @@ def disk_health():
     return disks
 
 
+def resolve(pl):
+    """A place with its lazily worked-out lists filled in (2.7.0 O2)."""
+    lazy = pl.pop('lazy', None)
+    if lazy:
+        pl.update(lazy())
+    return pl
+
+
 def places():
     """Every known place that only holds things that can be thrown away, with how and what it means."""
     la, home, win = env('LOCALAPPDATA'), env('USERPROFILE'), env('WINDIR', r'C:\Windows')
@@ -1218,16 +1323,24 @@ def places():
         {'id': 'devcache', 'icon': 'code', 'how': 'delete', 'level': 'safe',
          'paths': [os.path.join(la, 'pip', 'cache'), os.path.join(la, 'npm-cache'), os.path.join(la, 'Yarn', 'Cache'),
                    os.path.join(home, '.cache', 'pip')]},
-        {'id': 'devprojects', 'icon': 'code', 'how': 'delete', 'level': 'safe', 'paths': dev_dirs()},  # 2.6.0 #8
+        # 2.7.0 O2: the four lists below are worked out when the place is looked at (``lazy``), not to list the places
+        {'id': 'devprojects', 'icon': 'code', 'how': 'delete', 'level': 'safe', 'paths': [home], 'lazy': lambda: {'paths': dev_dirs()}},  # 2.6.0 #8
         {'id': 'compress', 'icon': 'archive', 'how': 'compress', 'level': 'safe', 'files': True,  # 2.6.0 #15
-         'paths': [home], 'only': compressible_files()},
+         'paths': [home], 'lazy': lambda: {'only': compressible_files()}},
         {'id': 'brokenlinks', 'icon': 'open', 'how': 'recycle', 'level': 'safe', 'files': True,  # 2.6.0 #12
          'paths': [os.path.join(home, 'Desktop'), os.path.join(env('APPDATA'), 'Microsoft', 'Windows', 'Start Menu'),
-                   os.path.join(home, 'Downloads')], 'only': broken_shortcuts() + empty_folders()},
+                   os.path.join(home, 'Downloads')], 'lazy': lambda: {'only': broken_shortcuts() + empty_folders()}},
         {'id': 'oldinstallers', 'icon': 'download', 'how': 'recycle', 'level': 'safe', 'files': True,  # 2.6.0 #33
-         'paths': [os.path.join(home, 'Downloads')], 'only': old_installer_versions()},
+         'paths': [os.path.join(home, 'Downloads')], 'lazy': lambda: {'only': old_installer_versions()}},
         {'id': 'installers', 'icon': 'download', 'how': 'recycle', 'level': 'safe', 'files': True, 'old_days': 30,
          'paths': [os.path.join(home, 'Downloads')], 'exts': INSTALLERS},
+        # 2.7.0 M2-13: the rest of Downloads by age; never the last 30 days, never ticked by default (personal files)
+        {'id': 'dlold180', 'icon': 'download', 'how': 'recycle', 'level': 'caution', 'old_days': 180,
+         'paths': [os.path.join(home, 'Downloads')], 'skip_exts': INSTALLERS},
+        {'id': 'dlold90', 'icon': 'download', 'how': 'recycle', 'level': 'caution', 'old_days': 90, 'new_days': 180,
+         'paths': [os.path.join(home, 'Downloads')], 'skip_exts': INSTALLERS},
+        {'id': 'dlold30', 'icon': 'download', 'how': 'recycle', 'level': 'caution', 'old_days': 30, 'new_days': 90,
+         'paths': [os.path.join(home, 'Downloads')], 'skip_exts': INSTALLERS},
         {'id': 'winupdate', 'icon': 'shield', 'how': 'admin', 'level': 'safe',
          'paths': [os.path.join(win, 'SoftwareDistribution', 'Download')]},
         {'id': 'memdump', 'icon': 'warn', 'how': 'admin', 'level': 'safe', 'files': True,
@@ -1458,6 +1571,11 @@ def compressible_files(home=None, min_size=20 * 2 ** 20, days=90):
     Cached 10 minutes."""
     if home is None and time.time() - _compressible['at'] < 600:
         return list(_compressible['files'])
+    if home is None and _last_extra.get('scan') is not None:  # noted by the last drive scan (2.7.0 O3)
+        got = scan_extra('compress', _last_extra['scan'])
+        if got is not None:
+            _compressible.update(at=time.time(), files=got)
+            return list(got)
     root, limit, out = home or env('USERPROFILE'), time.time() - days * 86400, []
     stack = [(root, 0)]
     while stack:
@@ -1754,6 +1872,61 @@ def old_installer_versions(folder=None):
     return [p for g in groups.values() if len(g) > 1 for _, p in sorted(g)[:-1]]
 
 
+def _list_dir(d):
+    """(name, path, stat) of everything directly in ``d`` ([] if it cannot be read)."""
+    out = []
+    try:
+        it = os.scandir(d)
+    except OSError:
+        return out
+    with it:
+        for e in it:
+            try:
+                out.append((e.name, e.path, e.stat(follow_symlinks=False)))
+            except OSError:
+                pass
+    return out
+
+
+def _walk_parallel(bases, descend, on_file, threads=6):
+    """Every folder below ``bases`` read by a few threads at once (2.7.0 O1): Windows lists a folder while the
+    interpreter lock is free, so a cache of tens of thousands of small folders (npm, pip) is read 3-4x faster.
+    ``descend(name, path)`` says whether to go into a subfolder; ``on_file(name, path, st)`` gets every file.
+    Links and junctions are never followed."""
+    import queue
+    q, lock = queue.Queue(), threading.Lock()
+    for b in bases:
+        q.put(b)
+
+    def work():
+        while True:
+            d = q.get()
+            if d is None:
+                return
+            try:
+                files = []
+                for name, path, st in _list_dir(d):
+                    attrs = getattr(st, 'st_file_attributes', 0)
+                    if attrs & REPARSE:
+                        continue
+                    if attrs & 0x10:
+                        if descend(name, path):
+                            q.put(path)
+                    else:
+                        files.append((name, path, st))
+                with lock:
+                    for f in files:
+                        on_file(*f)
+            finally:
+                q.task_done()
+    ts = [threading.Thread(target=work, daemon=True) for _ in range(threads)]
+    for t in ts:
+        t.start()
+    q.join()
+    for _ in ts:
+        q.put(None)
+
+
 def _place_files(pl):
     """(path, size, mtime) of every file a place would clean (skipping links, junctions and fresh files)."""
     now, out = time.time(), []
@@ -1765,39 +1938,29 @@ def _place_files(pl):
             except OSError:
                 pass
         return out
-    seen = set()
-    for base in pl['paths']:
-        if not base or not os.path.isdir(base) or os.path.normcase(base) in seen:
-            continue
-        seen.add(os.path.normcase(base))
-        stack = [base]
-        while stack:
-            d = stack.pop()
-            try:
-                it = os.scandir(d)
-            except OSError:
-                continue
-            with it:
-                for e in it:
-                    try:
-                        st = e.stat(follow_symlinks=False)
-                        if getattr(st, 'st_file_attributes', 0) & REPARSE:
-                            continue
-                        if e.is_dir(follow_symlinks=False):
-                            if not pl.get('files') and not (pl.get('fresh') and is_draft(e.name, True)):
-                                stack.append(e.path)
-                            continue
-                    except OSError:
-                        continue
-                    if pl.get('match') and not e.name.lower().startswith(pl['match']):
-                        continue
-                    if pl.get('exts') and os.path.splitext(e.name)[1].lower() not in pl['exts']:
-                        continue
-                    if pl.get('fresh') and (now - st.st_mtime < FRESH or is_draft(e.name)):
-                        continue
-                    if pl.get('old_days') and now - st.st_mtime < pl['old_days'] * 86400:
-                        continue
-                    out.append((e.path, st.st_size, st.st_mtime))
+    bases = list({os.path.normcase(b): b for b in pl['paths'] if b and os.path.isdir(b)}.values())
+
+    def descend(name, path):
+        return not pl.get('files') and not (pl.get('fresh') and is_draft(name, True))
+
+    def on_file(name, path, st):
+        if pl.get('match') and not name.lower().startswith(pl['match']):
+            return
+        if pl.get('exts') and os.path.splitext(name)[1].lower() not in pl['exts']:
+            return
+        if pl.get('fresh') and (now - st.st_mtime < FRESH or is_draft(name)):
+            return
+        if pl.get('old_days') and now - st.st_mtime < pl['old_days'] * 86400:
+            return
+        if pl.get('new_days') and now - st.st_mtime >= pl['new_days'] * 86400:
+            return  # older than the band: the next band has it (2.7.0 M2-13)
+        if pl.get('skip_exts') and os.path.splitext(name)[1].lower() in pl['skip_exts']:
+            return
+        if is_draft(name):
+            return
+        out.append((path, st.st_size, st.st_mtime))
+    if bases:
+        _walk_parallel(bases, descend, on_file)
     return out
 
 
@@ -1814,36 +1977,75 @@ def recycle_bin(drive):
     return info.size, info.items
 
 
-def cleanable(drive):
-    """The cleanable places on ``drive`` with what they hold now."""
+PLACE_TTL = 600            # a place read less than this long ago is not read again when Clean up opens (2.7.0 O1)
+_place_cache = {}          # (drive, place id) -> (when read, item or None)
+
+
+def _place_item(pl, drive):
+    resolve(pl)
+    pl['paths'] = [p for p in pl['paths'] if p and drive_of(p) == drive]
+    if not pl['paths']:
+        return None
+    files = _place_files(pl)
+    cl = cluster_size(drive)
+    size = sum((f[1] + cl - 1) // cl * cl for f in files)  # disk usage, whole clusters (2.4.0 §6)
+    if not size:
+        return None
+    return {**{k: pl[k] for k in ('id', 'icon', 'how', 'level')}, 'size': size, 'count': len(files),
+            'where': pl['paths'][0] if len(pl['paths']) == 1 else os.path.commonpath(pl['paths']) if len({drive_of(p) for p in pl['paths']}) == 1 else ''}
+
+
+def _chat_item(a):
+    files = _place_files({'paths': [a['data']]})
+    return {'id': a['id'], 'app': a['app'], 'icon': 'note', 'how': 'inapp', 'level': 'inapp', 'data': a['data'],
+            'exe': bool(a['exe']), 'size': sum(f[1] for f in files), 'count': len(files)}
+
+
+def cleanable(drive, refresh=True):
+    """The cleanable places on ``drive`` with what they hold now. ``refresh``: True reads every place again; a
+    set of place ids reads only those, the others come from the last look if it is under PLACE_TTL old (2.7.0
+    O1: a single deletion read all of them again, 8-12 s on a PC with large npm/pip caches). Places are read
+    side by side, each with a few threads. The Recycle Bin and hibernation are asked every time (instant)."""
+    from concurrent.futures import ThreadPoolExecutor
     drive = drive.upper()
-    out = []
+    now = time.time()
+    jobs = []
     for pl in places():
         if pl['id'] == 'recycle':
-            size, n = recycle_bin(drive)
-            if size:
-                out.append({**{k: pl[k] for k in ('id', 'icon', 'how', 'level')}, 'size': size, 'count': n})
             continue
-        pl['paths'] = [p for p in pl['paths'] if p and drive_of(p) == drive]
-        if not pl['paths']:
-            continue
-        files = _place_files(pl)
-        cl = cluster_size(drive)
-        size = sum((f[1] + cl - 1) // cl * cl for f in files)  # disk usage, whole clusters (2.4.0 §6)
-        if size:
-            out.append({**{k: pl[k] for k in ('id', 'icon', 'how', 'level')}, 'size': size, 'count': len(files),
-                        'where': pl['paths'][0] if len(pl['paths']) == 1 else os.path.commonpath(pl['paths']) if len({drive_of(p) for p in pl['paths']}) == 1 else ''})
+        jobs.append((pl['id'], lambda pl=pl: _place_item(pl, drive)))
     for a in chat_apps():
         if drive_of(a['data']) == drive:
-            files = _place_files({'paths': [a['data']]})
-            out.append({'id': a['id'], 'app': a['app'], 'icon': 'note', 'how': 'inapp', 'level': 'inapp', 'data': a['data'],
-                        'exe': bool(a['exe']), 'size': sum(f[1] for f in files), 'count': len(files)})
+            jobs.append((a['id'], lambda a=a: _chat_item(a)))
+    found, todo = {}, []
+    for pid, fn in jobs:
+        hit = _place_cache.get((drive, pid))
+        if refresh is not True and pid not in (refresh or ()) and hit and now - hit[0] < PLACE_TTL:
+            found[pid] = hit[1]
+        else:
+            todo.append((pid, fn))
+    if todo:
+        with ThreadPoolExecutor(min(6, len(todo))) as ex:
+            for pid, item in zip([p for p, _ in todo], ex.map(lambda j: _safe(j[1]), todo)):
+                found[pid] = item
+                _place_cache[(drive, pid)] = (now, item)
+    out = [found[pid] for pid, _ in jobs if found.get(pid)]
+    size, n = recycle_bin(drive)
+    if size:
+        out.append({'id': 'recycle', 'icon': 'trash', 'how': 'empty', 'level': 'caution', 'size': size, 'count': n})
     if drive == system_drive():
         h = hibernation()
         if h['size'] or h['on']:
             out.append({'id': 'hiber', 'icon': 'power', 'how': 'switch', 'level': 'safe', 'on': h['on'], 'size': h['size'], 'count': 1})
     out.sort(key=lambda x: -x['size'])
     return out
+
+
+def _safe(fn):
+    try:
+        return fn()
+    except Exception:  # one unreadable place must not hide the others
+        return None
 
 
 def clean(drive, place_id, recycle=None):
@@ -1858,6 +2060,7 @@ def clean(drive, place_id, recycle=None):
     pl = next((p for p in places() if p['id'] == place_id), None)
     if not pl or pl['how'] == 'admin':
         return {'freed': 0, 'cleaned': 0, 'failed': 0, 'code': 'notAllowed'}
+    resolve(pl)
     bases = [p for p in pl['paths'] if p and drive_of(p) == drive]
     pl['paths'] = bases
     freed = cleaned = failed = 0
@@ -1933,3 +2136,8 @@ def delete_file(path, scan=None, recycle=None, permanent=False):
         scan.big = [b for b in scan.big if b[1] != path]
         heapq.heapify(scan.big)
     return {'ok': True, 'size': size, 'recycled': not permanent}
+
+
+# at the very end: a worker process needs every function above (2.7.0)
+if __name__ == '__main__' and '--scan-worker' in __import__('sys').argv:
+    _scan_worker()

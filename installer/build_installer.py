@@ -23,7 +23,7 @@ STAGE = ROOT / 'build' / 'stage'
 DIST = ROOT / 'dist'
 ISS = Path(__file__).resolve().parent / 'DesktopWatch.iss'
 
-APP_FILES = ['cleaner.py', 'server.py', 'window.py', 'updates.py', 'extractors.py', 'tray.py', 'winwatch.py', 'xlsx.py', 'README.md']
+APP_FILES = ['cleaner.py', 'server.py', 'features.py', 'insights.py', 'trust.py', 'window.py', 'updates.py', 'extractors.py', 'tray.py', 'winwatch.py', 'xlsx.py', 'README.md']
 SITE_PACKAGES = ['pypdf']  # pure-Python PDF text; PyMuPDF would be faster but adds ~100 MB
 STDLIB_SKIP = {'test', 'tests', 'idle_test', 'idlelib', 'ensurepip', 'lib2to3', 'turtledemo', 'venv',
                'pydoc_data', 'site-packages', '__pycache__', 'distutils', 'unittest'}
@@ -36,12 +36,28 @@ def app_version():
     return m.group(1)
 
 
+def merged_i18n():
+    """static/i18n.js with its layered blocks folded into one table (2.7.0 O7), made with Node.js when it is
+    there; otherwise the layered file itself (same result, a little slower to open)."""
+    src, out = APP_SRC / 'static' / 'i18n.js', ROOT / 'build' / 'i18n.merged.js'
+    if out.exists() and out.stat().st_mtime >= src.stat().st_mtime:
+        return out
+    node = shutil.which('node')
+    if not node:
+        print('node not found: i18n.js is shipped unmerged')
+        return src
+    out.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([node, str(Path(__file__).resolve().parent / 'merge_i18n.js'), str(src), str(out)], check=True)
+    return out
+
+
 def app_files():
     """The program files, as {path inside the program folder: source file} (installer and licenses)."""
     out = {name: APP_SRC / name for name in APP_FILES}
     for f in sorted((APP_SRC / 'static').rglob('*')):
         if f.is_file() and '__pycache__' not in f.parts:
             out[f.relative_to(APP_SRC).as_posix()] = f
+    out['static/i18n.js'] = merged_i18n()
     return out
 
 

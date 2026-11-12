@@ -1084,6 +1084,127 @@
      "zh": "跨越多个版本更新时，更新说明只显示你实际得到的内容：中间加入又被移除的功能不再列出；只有你用过的功能被移除时才会提到"
     }
    ]
+  },
+  {
+   "version": "2.7.0",
+   "date": "2026-11-12",
+   "changes": [
+    {
+     "level": 5,
+     "en": "Restore from a backup folder: check what a backup holds (versions read back against their checksums), then merge it into the current history or replace the current history — the previous one is always kept aside, a backup DeskTrace cannot read is refused",
+     "zh": "从备份文件夹恢复：先检查备份内容（抽查版本与校验值是否一致），再合并到当前历史或替换当前历史——原来的历史总会另外保留；桌迹读不了的备份会被拒绝"
+    },
+    {
+     "level": 5,
+     "en": "Activity record (Settings › Trust and history): every restore, cleanup, backup, settings change and note, by you or by DeskTrace, with time and result — never the text of a note; CSV export, kept 12 months",
+     "zh": "活动记录（设置 › 可信与历史）：你或桌迹做过的每次恢复、清理、备份、设置更改和备注，含时间和结果——绝不记录备注文字；可导出 CSV，保留 12 个月"
+    },
+    {
+     "level": 5,
+     "en": "Protection overview: how many watched files have a kept version and why the others have none (too large, online-only, not changed yet), each group one click away; the last 7 days' warnings, last cleanup and last backup",
+     "zh": "保护概览：多少受监控文件有已保存版本、其余的为什么没有（过大、仅在线、尚未改过），每类一点即看；最近 7 天的警告、上次清理和上次备份"
+    },
+    {
+     "level": 5,
+     "en": "What will be forgotten: the history limits show in advance which changes the next 7 days will forget and how much space that gives back; noted and \"Keep forever\" versions are never on it, and the cleanup removes exactly what was shown",
+     "zh": "将被清除的内容：按当前规则提前列出未来 7 天会清除哪些变化、释放多少空间；带备注和“永久保留”的版本绝不在内，实际清理与预览完全一致"
+    },
+    {
+     "level": 5,
+     "en": "Limits per folder: each watched folder can keep its history for its own number of days and have its own space cap; empty means the global setting",
+     "zh": "按文件夹设置保留规则：每个受监控文件夹可以有自己的保留天数和空间上限；留空即使用全局设置"
+    },
+    {
+     "level": 5,
+     "en": "Replacing a file with an older version keeps its current content first, so every replace can be undone; if that is impossible (too large, disk full) you choose",
+     "zh": "用旧版本替换文件前，会先保存它当前的内容，所以每次替换都能撤回；无法保存时（文件过大、磁盘已满）由你决定"
+    },
+    {
+     "level": 5,
+     "en": "Space map through time: see a drive's folders as they were 7, 14 or 30 days ago with what changed outlined, or coloured by growth (grew / shrank / about the same) with the numbers; full scans are now kept one per day for 90 days",
+     "zh": "空间分布图的时间回放：查看磁盘 7、14 或 30 天前的文件夹分布，变化处描边；或按增长着色（变大 / 变小 / 基本不变）并标出数字；完整扫描现在每天保留一份、保留 90 天"
+    },
+    {
+     "level": 5,
+     "en": "Search in plain words: \"deleted Excel files last week\" or \"上周删除的表格\" becomes filters you can see and take off; if nothing matches by name, search inside documents is offered",
+     "zh": "用自然语言搜索：“上周删除的表格”或 “deleted Excel files last week” 会变成看得见、可去掉的筛选条件；名称没有匹配时，可改为搜索文档内容"
+    },
+    {
+     "level": 5,
+     "en": "What changed in the structure of Word, Markdown, PowerPoint and Excel files: headings, slides, table rows, cells and changed numbers, above the comparison",
+     "zh": "Word、Markdown、PowerPoint 和 Excel 文件的结构变化：标题、幻灯片、表格行、单元格和变化的数字，显示在对比上方"
+    },
+    {
+     "level": 4,
+     "en": "Export all versions of a file or folder: v1, v2, … plus a manifest.csv with time, note and checksum; size shown first, and a stopped export continues where it was",
+     "zh": "导出文件或文件夹的全部版本：v1、v2……以及含时间、备注和校验值的 manifest.csv；先显示大小，中断后可从原处继续"
+    },
+    {
+     "level": 4,
+     "en": "Weekly report: the week's versions, restores, freed space and unusual events, as a Markdown file and (if you like) one quiet Monday notification; made on this PC only",
+     "zh": "保护周报：一周保存的版本、恢复、释放的空间和异常事件，可存为 Markdown，也可以（如果你愿意）每周一一条安静的通知；只在本机生成"
+    },
+    {
+     "level": 4,
+     "en": "Mass-change alert you can tune: how many changes in how many seconds, and how long \"that was normal\" keeps it quiet (10 min, 1 hour, 24 hours)",
+     "zh": "可调整的大量变更预警：多少秒内多少处变化，以及“这是正常的”之后保持安静多久（10 分钟、1 小时、24 小时）"
+    },
+    {
+     "level": 4,
+     "en": "Scheduled cleanup of caches and temporary files — off unless you set it up, only the items you tick, never your own files, every run in the activity record",
+     "zh": "定时清理缓存和临时文件——除非你设置否则不开启，只清理你勾选的项目，绝不碰你自己的文件，每次运行都写入活动记录"
+    },
+    {
+     "level": 4,
+     "en": "Changes: Ctrl/Shift+click several changes to note, save or restore them together; sort by size of change or how often a file changed; only big changes; deleted files still in the Recycle Bin or that only DeskTrace has; saved views",
+     "zh": "变化列表：按住 Ctrl/Shift 点选多项，一起备注、另存或恢复；按变动幅度或修改频次排序；只看大改动；仍在回收站中 / 只有桌迹有副本的已删除文件；保存的视图"
+    },
+    {
+     "level": 4,
+     "en": "In a folder: what happened between two dates — new, changed, deleted, renamed and net size — each number opens the list",
+     "zh": "文件夹时间切片：两个日期之间新增、修改、删除、重命名的数量和净增大小，点击数字即可查看列表"
+    },
+    {
+     "level": 4,
+     "en": "Clean up: Downloads by age (older than 6 months, 3–6, 1–3; never ticked for you), kinds of big files, \"free me X GB\" that only ticks safe items, a copyable check-up, time left while a drive is read, and a much faster start (it no longer reads every place again after each deletion)",
+     "zh": "空间清理：按时间分批的下载内容（半年以上、3–6 个月、1–3 个月；不会替你勾选）、大文件类型筛选、只勾安全项的“帮我腾出 X GB”、可复制的体检简报、扫描剩余时间，打开也快得多（每删一个文件不再重新读一遍所有位置）"
+    },
+    {
+     "level": 4,
+     "en": "Notes get a colour label (Final, Draft, Important, Sent to client); notifications are three switches: deleted or overwritten files, low disk space, ordinary changes; a deletion's notification opens its Restore",
+     "zh": "备注可加颜色标签（定稿、草稿、重要、已发客户）；通知改为三个开关：删除或覆盖文件、磁盘空间不足、普通修改；删除通知点开即是恢复"
+    },
+    {
+     "level": 3,
+     "en": "Previews: Space for a quick look, line numbers with copy-a-line, PDF page jump, long unchanged parts folded, step from change to change, the differences shown inside the replace dialog, .patch export, the real checksum (SHA-1 / SHA-256) of each version",
+     "zh": "预览：按空格快速查看、带行号可复制单行、PDF 跳页、长段未改动内容折叠、在改动之间跳转、替换对话框里直接看差异、导出 .patch、每个版本的真实校验值（SHA-1 / SHA-256）"
+    },
+    {
+     "level": 3,
+     "en": "Preferences: name of restored copies, time format, text size (also Ctrl + wheel), window on top and compact width, double-click action, side-by-side direction, the global shortcut (or off), sound when done, recent searches, a copied path offered (off by default), Desktop shortcut",
+     "zh": "偏好设置：恢复副本的命名、时间格式、文字大小（也可 Ctrl+滚轮）、窗口置顶和紧凑宽度、双击行为、并排对比方向、全局快捷键（可关闭）、完成提示音、最近搜索、识别复制的路径（默认关闭）、桌面快捷方式"
+    },
+    {
+     "level": 3,
+     "en": "Support bundle: the last 300 log lines, the check-up and the settings with your user name taken out, shown before it is saved",
+     "zh": "诊断包：最近 300 行日志、自检结果和设置（已去掉你的用户名），保存前先给你看"
+    },
+    {
+     "level": 2,
+     "en": "Clearer promises: only versions up to the snapshot limit are kept, and each change says when there is no copy of it; \"Keep forever\" says it is not protection against ransomware",
+     "zh": "说法更准确：只有不超过快照上限的版本才会保存，没有副本的变化会注明；“永久保留”明确说明它不能防勒索软件"
+    },
+    {
+     "level": 2,
+     "en": "Quieter in the background: started with Windows it opens nothing; scans and indexing run in Windows' efficiency mode; Explorer's menu changes at once; a removed USB drive no longer leaves an error page",
+     "zh": "后台更安静：随 Windows 启动时不打开任何窗口；扫描和索引在 Windows 能效模式下运行；资源管理器右键菜单即时生效；拔出 U 盘不再留下错误页面"
+    },
+    {
+     "level": 1,
+     "en": "Faster to open and lighter: translations merged at build time, rarely used parts loaded only when needed, one look at the disk per file in long lists",
+     "zh": "打开更快、更轻：翻译在构建时合并，少用的部分用到时才加载，长列表中每个文件只查一次磁盘"
+    }
+   ]
   }
  ],
  "removed_features": {
