@@ -657,7 +657,7 @@ document.addEventListener('mouseover', ev => {
       if (WEB_IMG.test(e.name) && (e.has_blob || e.has_prev_blob)) html = `<img src="${blobUrl(h, e.name)}" alt="">`;
       else {
         const r = await get('/api/content', { hash: h, ext: e.ext }).catch(() => null);
-        const lines = r && r.ok ? (r.content.preview || r.content.text || '') : '';
+        const lines = r && r.ok ? localizeMarkers(r.preview || r.content.text || '', true) : '';  // Word, PDF, Excel, PowerPoint too (2.7.1 G2)
         html = lines ? `<pre>${esc(String(lines).split('\n').slice(0, 8).join('\n').slice(0, 600))}</pre>` : '';
       }
       hoverCache.set(h, html);
@@ -1158,8 +1158,8 @@ document.addEventListener('click', async ev => {
   const put = async list => { const r = await post('/api/settings', { saved_searches: list }); if (r.ok) P.saved_searches = r.settings.saved_searches; m.innerHTML = viewMenuHTML(); };
   const use = ev.target.closest('[data-vs]'), ren = ev.target.closest('[data-vs-ren]'), del = ev.target.closest('[data-vs-del]');
   if (use) { ev.stopPropagation(); m.hidden = true; applySaved(saved[+use.dataset.vs].filters); }
-  else if (ev.target.closest('[data-vs-save]')) { ev.stopPropagation(); const name = prompt(t('ss9.name'), S.q || t('ss9.default')); if (name && name.trim()) put([...saved, { name: name.trim(), v: 1, filters: curFilters() }]); }
-  else if (ren) { ev.stopPropagation(); const x = saved[+ren.dataset.vsRen]; const name = prompt(t('ss9.name'), x.name); if (name && name.trim()) { x.name = name.trim(); put(saved); } }
+  else if (ev.target.closest('[data-vs-save]')) { ev.stopPropagation(); m.hidden = true; const name = await askName(t('ss9.save'), S.q || t('ss9.default')); if (name) put([...saved, { name, v: 1, filters: curFilters() }]); }
+  else if (ren) { ev.stopPropagation(); m.hidden = true; const x = saved[+ren.dataset.vsRen]; const name = await askName(t('ss9.rename'), x.name); if (name) { x.name = name; put(saved); } }
   else if (del) { ev.stopPropagation(); m.hidden = true; if (await confirmBox(t('ss9.delTitle'), esc(saved[+del.dataset.vsDel].name), t('ss9.delete'), true)) { saved.splice(+del.dataset.vsDel, 1); put(saved); } }
 }, true);
 
@@ -1190,3 +1190,61 @@ async function bundleDialog2(paths, since = 0, until = 0) {
   };
   tick();
 }
+
+/* ================================================================ 2.7.1 */
+
+/* G3: a name asked in the app's own dialog (en + zh), not the browser's prompt() */
+function askName(title, initial = '') {
+  return new Promise(res => {
+    openModal(`<div class="m-head"><h3>${esc(title)}</h3><button class="icon-btn" data-close>${svg('x')}</button></div>
+      <div class="m-body"><label class="hint" for="askIn">${t('ss9.name')}</label><input type="text" id="askIn" maxlength="80" style="width:100%" value="${esc(initial)}"></div>
+      <div class="m-foot"><button class="btn" id="askNo">${t('btn.cancel')}</button><button class="btn primary" id="askOk">${t('ss9.ok')}</button></div>`, 'sm');
+    const inp = $('#askIn'), done = v => { closeModal(); res(v); };
+    inp.focus(); inp.select();
+    $('#askOk').onclick = () => done(inp.value.trim() || null);
+    $('#askNo').onclick = () => done(null);
+    $('#modal [data-close]').onclick = () => done(null);
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); done(inp.value.trim() || null); } if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+  });
+}
+
+/* G1: side by side also folds long runs of unchanged lines (the unified view did since 2.7.0) */
+sideHTML = function (d) {
+  const unit = UNIT[d.type] || 'line';
+  const cell = (r, side) => {
+    if (!r) return '<span class="ln"></span><span class="tx empty"></span>';
+    const cls = r.k === ' ' ? '' : r.k === '-' ? 'del' : 'add';
+    const tx = r.s ? r.s.map(([c, x]) => c ? `<mark>${esc(x)}</mark>` : esc(x)).join('') : decorate(r.t, d.type);
+    return `<span class="ln ${cls}">${r[side] ?? ''}</span><span class="tx ${cls}">${tx || ' '}</span>`;
+  };
+  return d.hunks.map(h => {
+    const pairs = [];
+    for (let i = 0; i < h.rows.length;) {
+      if (h.rows[i].k === ' ') { pairs.push({ k: ' ', l: h.rows[i], r: h.rows[i] }); i++; continue; }
+      const dels = [], adds = [];
+      while (i < h.rows.length && h.rows[i].k === '-') dels.push(h.rows[i++]);
+      while (i < h.rows.length && h.rows[i].k === '+') adds.push(h.rows[i++]);
+      for (let j = 0; j < Math.max(dels.length, adds.length); j++) pairs.push({ k: 'x', l: dels[j], r: adds[j] });
+    }
+    return `<div class="hunk-h"><span>${t('diff.hunk', { U: unitCap(unit), a: h.a, b: h.b })}</span><span>${t('diff.changedN', { n: h.rows.filter(r => r.k !== ' ').length })}</span></div>`
+      + foldRuns(pairs, ps => ps.map(p => `<div class="srow">${cell(p.l, 'a')}${cell(p.r, 'b')}</div>`).join(''));
+  }).join('');
+};
+
+/* G5: Clean up opens on the sizes of the last look, and says so while they are read again */
+const _renderClean271 = renderClean;
+renderClean = function () {
+  _renderClean271();
+  const d = S.clean;
+  if (!d || d.items_state !== 'scanning' || !d.items_at || !(d.items || []).length) return;
+  const head = $$('#list .day').find(x => x.textContent === t('cl.safe'));
+  head?.insertAdjacentHTML('afterend', `<div class="hint cl-asof"><span class="spin"></span> ${t('cl.asOf', { when: fmtFull(d.items_at) })}</div>`);
+};
+
+/* G4: the overview is counted at most once a minute; it says when */
+const _drawOverview271 = drawOverview;
+drawOverview = async function () {
+  await _drawOverview271();
+  const o = await get('/api/overview').catch(() => null);
+  if (o && o.at && $('#ovCard .ov-card')) $('#ovCard .ov-card').insertAdjacentHTML('beforeend', `<div class="hint">${t('ov.asOf', { when: fmtTime(o.at) })}</div>`);
+};

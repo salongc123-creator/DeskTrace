@@ -4,6 +4,19 @@ Every change has a level: **New** (new capability), **Major**, **Improved**, **P
 
 每项变化都有级别：新功能、重要改进、改进、打磨、修复。含“新功能”的版本第二位数字加一，否则第三位加一。
 
+## 2.7.1 — 2026-11-12
+
+- **Improved** · Clean up opens at once on the sizes of its last look, also after a restart, and says when they are from while it reads them again  
+  改进 · 空间清理会立即显示上次读取的大小（重启后也是），并注明时间，同时在后台重新读取
+- **Improved** · Hovering a version in the history now previews Word, PDF, Excel and PowerPoint files too, not only text  
+  改进 · 在历史中悬停某个版本时，现在 Word、PDF、Excel 和 PowerPoint 文件也能预览开头内容，不只是文本
+- **Polish** · The side-by-side comparison folds long unchanged parts like the single-column view  
+  打磨 · 并排对比也会像单栏视图一样折叠长段未改动的内容
+- **Polish** · Saved views are named in DeskTrace's own dialog  
+  打磨 · 保存的视图在桌迹自己的对话框中命名
+- **Polish** · The protection overview in Settings opens faster: it is counted again only when files or versions change, and says when it was counted  
+  打磨 · 设置中的保护概览打开更快：只有文件或版本变化时才重新统计，并注明统计时间
+
 ## 2.7.0 — 2026-11-12
 
 - **New** · Restore from a backup folder: check what a backup holds (versions read back against their checksums), then merge it into the current history or replace the current history — the previous one is always kept aside, a backup DeskTrace cannot read is refused  

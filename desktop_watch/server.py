@@ -53,7 +53,7 @@ from extractors import EXTRACTABLE, VERSION as EXTRACT_VERSION, category_of, ext
 APP_DIR = Path(__file__).resolve().parent
 APP_ID = 'desktop-watch/1'   # internal id (kept from the old name: older copies answer to it)
 APP_NAME = 'DeskTrace'
-APP_VERSION = '2.7.0'      # the installer and update licenses take their version number from here
+APP_VERSION = '2.7.1'      # the installer and update licenses take their version number from here
 SCHEMA_VERSION = 2       # bump with a step in migrate() whenever stored data changes shape
 TOKEN = secrets.token_hex(16)
 
@@ -1618,12 +1618,20 @@ RECYCLED_PLACES = {'brokenlinks', 'oldinstallers', 'installers'}  # places whose
 def find_cleanable(drive, refresh=True):
     """Work out the cleanable places of ``drive`` in the background. ``refresh``: True reads every place; a set
     of place ids only those (the rest as last read, under 10 minutes old) (2.7.0 O1)."""
-    _cleanable[drive] = {'state': 'scanning', 'items': (_cleanable.get(drive) or {}).get('items')}
+    prev = _cleanable.get(drive) or {}
+    if not prev.get('items'):  # 2.7.1 G5: open on the sizes of the last look (also after a restart), refreshed below
+        last = (App.store.meta('cleanable_last') or {}).get(drive) or {}
+        prev = {'items': last.get('items'), 'at': last.get('at')}
+    _cleanable[drive] = {'state': 'scanning', 'items': prev.get('items'), 'at': prev.get('at')}
 
     def work():
         background_thread()
         try:
-            _cleanable[drive] = {'state': 'done', 'items': cleaner.cleanable(drive, refresh)}
+            items = cleaner.cleanable(drive, refresh)
+            _cleanable[drive] = {'state': 'done', 'items': items, 'at': time.time()}
+            kept = App.store.meta('cleanable_last') or {}
+            kept[drive] = {'at': time.time(), 'items': items}
+            App.store.set_meta('cleanable_last', {d: v for d, v in kept.items() if d in [x['drive'] for x in cleaner.drives()]})
         except Exception as e:
             _cleanable[drive] = {'state': 'failed', 'items': [], 'error': repr(e)}
     threading.Thread(target=work, daemon=True, name='cleanable').start()
@@ -2376,7 +2384,7 @@ class Handler(BaseHTTPRequestHandler):
                             find_cleanable(d, set())  # places read less than 10 minutes ago are not read again (2.7.0 O1)
                 sc, cl = _scans.get(d), _cleanable.get(d) or {}
                 usage = next((x for x in cleaner.drives() if x['drive'] == d), {})
-                out = {'ok': True, 'drive': d, 'usage': usage, 'items': cl.get('items'), 'items_state': cl.get('state'),
+                out = {'ok': True, 'drive': d, 'usage': usage, 'items': cl.get('items'), 'items_state': cl.get('state'), 'items_at': cl.get('at'),
                        'note': _scan_notes.get(d), 'hdd': cleaner.is_hdd(d), 'quick_default': cleaner.is_hdd(d)}
                 if sc:
                     out.update(sc.summary(qs.get('folder') or None) if sc.state != 'scanning' else sc.progress())
@@ -2420,7 +2428,8 @@ class Handler(BaseHTTPRequestHandler):
                                        'version': APP_VERSION, 'suggested': suggested_folders(App.mon.settings['roots'])})
             if route == '/api/content':
                 res = App.store.content(qs.get('hash'), qs.get('ext', '')) if valid_hash(qs.get('hash')) else None
-                return self.send_json({'ok': res is not None, 'content': strip_lines(res)})
+                return self.send_json({'ok': res is not None, 'content': strip_lines(res),  # first lines for hover previews (2.7.1 G2)
+                                       'preview': '\n'.join(l for l in (res or {}).get('lines', [])[:12] if l.strip())[:800] if res else ''})
             if route == '/api/compare':
                 return self.send_json(self.compare(qs))
             if route == '/api/current':

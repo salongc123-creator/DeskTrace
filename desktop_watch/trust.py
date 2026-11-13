@@ -138,7 +138,20 @@ def folder_caps(store, blobs, keep):
 
 
 # ---------------------------------------------------------------------------------------------- F2: protection overview
+_overview = {'key': None, 'res': None}
+
+
 def overview():
+    """F2, cached until the watched files or their versions change, or a minute passes (2.7.1 G4: every open looked at
+    the disk once per watched file)."""
+    App = N['App']
+    key = (App.mon.gen, int(time.time() // 60))
+    if _overview['key'] != key:
+        _overview.update(key=key, res={**_overview_now(), 'at': time.time()})
+    return _overview['res']
+
+
+def _overview_now():
     """F2: how complete the history is: files watched, with a kept version, and why the others have none."""
     App = N['App']
     with App.mon.lock:

@@ -1823,6 +1823,10 @@ Object.assign(I18N.zh, {
   'vb.done': '已把 {n} 个版本导出到 {path}。', 'vb.none': '这里没有可导出的已保存版本。',
 });
 
+/* 2.7.1 */
+Object.assign(I18N.en, { 'ss9.ok': 'Save', 'cl.asOf': 'Sizes as of {when} — being read again', 'ov.asOf': 'as of {when}' });
+Object.assign(I18N.zh, { 'ss9.ok': '保存', 'cl.asOf': '大小为 {when} 的结果——正在重新读取', 'ov.asOf': '统计于 {when}' });
+
 let LANG = 'en';
 
 function t(key, vars = {}) {

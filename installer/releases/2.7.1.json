@@ -1,0 +1,7 @@
+{"changes": [
+ {"level": 3, "en": "Clean up opens at once on the sizes of its last look, also after a restart, and says when they are from while it reads them again", "zh": "空间清理会立即显示上次读取的大小（重启后也是），并注明时间，同时在后台重新读取"},
+ {"level": 3, "en": "Hovering a version in the history now previews Word, PDF, Excel and PowerPoint files too, not only text", "zh": "在历史中悬停某个版本时，现在 Word、PDF、Excel 和 PowerPoint 文件也能预览开头内容，不只是文本"},
+ {"level": 2, "en": "The side-by-side comparison folds long unchanged parts like the single-column view", "zh": "并排对比也会像单栏视图一样折叠长段未改动的内容"},
+ {"level": 2, "en": "Saved views are named in DeskTrace's own dialog", "zh": "保存的视图在桌迹自己的对话框中命名"},
+ {"level": 2, "en": "The protection overview in Settings opens faster: it is counted again only when files or versions change, and says when it was counted", "zh": "设置中的保护概览打开更快：只有文件或版本变化时才重新统计，并注明统计时间"}
+]}
