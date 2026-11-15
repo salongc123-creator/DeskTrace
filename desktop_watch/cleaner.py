@@ -108,7 +108,11 @@ def cloud_root_of(path):
 
 
 def online_only(path):
-    """True for a cloud placeholder: listed with its size, but nothing of it is on this disk."""
+    """True for a cloud placeholder: listed with its size, but nothing of it is on this disk. Placeholders exist only
+    in a folder a cloud service registered with Windows (cloud_roots), so files elsewhere are not looked at (2.7.2:
+    one attribute read per file, 0.09 ms, while indexing, copying and comparing)."""
+    if not cloud_root_of(path):
+        return False
     try:
         return bool(os.stat(path, follow_symlinks=False).st_file_attributes & ONLINE_ONLY)
     except (OSError, AttributeError):
@@ -764,6 +768,11 @@ class DriveScan:
                 pr.kill()
             except OSError:
                 pass
+        for pr in procs:  # 2.7.2: a killed worker takes a moment to go; "stopped" means they are gone
+            try:
+                pr.wait(2)
+            except Exception:
+                pass
         return None
 
     def _keep(self, d, size, n, kept, force=False):
@@ -1290,6 +1299,11 @@ def resolve(pl):
     return pl
 
 
+def places_holding(path):
+    """The ids of the cleanable places whose folders contain ``path`` (their sizes change when it goes)."""
+    return {pl['id'] for pl in places() if any(p and inside(path, p) for p in pl['paths'])}
+
+
 def places():
     """Every known place that only holds things that can be thrown away, with how and what it means."""
     la, home, win = env('LOCALAPPDATA'), env('USERPROFILE'), env('WINDIR', r'C:\Windows')
@@ -1674,6 +1688,21 @@ def movable(d, size):
     return n not in fixed and not getattr(os.path, 'isjunction', lambda _: False)(d)
 
 
+def make_junction(link, target):
+    """A directory junction at ``link`` pointing to ``target``, made by Windows itself (2.7.2, Gemini's review):
+    ``cmd /c mklink`` split a path with ``&`` or ``^`` in it (``C&A``) into two commands."""
+    try:
+        import _winapi
+        _winapi.CreateJunction(target, link)
+    except (ImportError, AttributeError):  # not expected on Windows: the old way, paths quoted
+        import subprocess
+        r = subprocess.run(f'cmd /c mklink /J "{link}" "{target}"', capture_output=True, creationflags=0x08000000)
+        if r.returncode != 0:
+            raise OSError('junction')
+    if not os.path.isdir(link):
+        raise OSError('junction')
+
+
 def move_folder(src, dest, progress=None):
     """Move folder ``src`` to ``dest`` (on another drive) and leave a junction at ``src`` pointing there, so
     programs find it as before (2.6.0 #3). Steps, each checked: rename ``src`` aside (fails at once if a
@@ -1702,9 +1731,7 @@ def move_folder(src, dest, progress=None):
             if os.path.getsize(f) != os.path.getsize(g) or _sha256_file(f) != _sha256_file(g):
                 raise OSError('verify')
             progress(step='verify', done=i + 1, total=len(files))
-        r = subprocess.run(['cmd', '/c', 'mklink', '/J', src, dest], capture_output=True, creationflags=0x08000000)
-        if r.returncode != 0 or not os.path.isdir(src):
-            raise OSError('junction')
+        make_junction(src, dest)
     except (OSError, shutil.Error) as e:
         if os.path.isdir(src) and getattr(os.path, 'isjunction', lambda _: False)(src):
             os.rmdir(src)

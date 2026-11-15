@@ -334,9 +334,7 @@ def bin_peek(drive, days=7):
 def space_heat(d, days):
     """S1.2: per folder of the space map, how it changed between the newest full scan and one about ``days``
     older: grew / shrank / stable, with the numbers (folders of 50 MB or more are in the scan history)."""
-    App, cl = N['App'], N['cleaner']
-    rows = [r for r in App.store.q('SELECT finished, serial, sizes FROM scan_history WHERE drive=? ORDER BY finished DESC', (d,))
-            if r['serial'] == cl.volume_serial(d)]
+    rows = N['insights'].history_rows(d)  # the drive's serial asked once, not once per kept scan
     if len(rows) < 2:
         return {'ok': True, 'ready': False, 'scans': len(rows)}
     import zlib
@@ -607,16 +605,21 @@ def event_filter(qs):
     if qs.get('big'):  # M2-9: only changes of 1 KB or more
         where.append('ABS(COALESCE(size, 0) - COALESCE(old_size, 0)) >= 1024')
     if qs.get('inbin') or qs.get('snaponly'):  # M2-11: deleted files still in the Recycle Bin / that only DeskTrace has
-        bins = sorted(bin_paths())[:5000]
+        bins = bin_paths()
+        # matched here, not with SQLite's LOWER() (ASCII only): the exact recorded spellings of the paths in the bin;
+        # an empty bin needs no look at the history, and the list goes to SQLite as one JSON value (2.7.2: it was
+        # cut at 5,000, which counted the rest as "only DeskTrace has it")
+        hits = sorted(r['path'] for r in N['App'].store.q("SELECT DISTINCT path FROM events WHERE kind = 'deleted'")
+                      if os.path.normcase(r['path']) in bins) if bins else []
         where.append("kind = 'deleted'")
         if qs.get('inbin'):
-            where.append(f"LOWER(path) IN ({','.join('?' * len(bins)) or 'NULL'})")
-            args += bins
+            where.append('path IN (SELECT value FROM json_each(?))' if hits else '0')
+            args += [json.dumps(hits)] if hits else []
         else:
             where.append('prev_hash IS NOT NULL AND path NOT IN (SELECT path FROM files)')
-            if bins:
-                where.append(f"LOWER(path) NOT IN ({','.join('?' * len(bins))})")
-                args += bins
+            if hits:
+                where.append('path NOT IN (SELECT value FROM json_each(?))')
+                args.append(json.dumps(hits))
     return where, args
 
 

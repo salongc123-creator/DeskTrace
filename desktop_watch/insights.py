@@ -37,17 +37,20 @@ def thin_history(store, drive):
     return len(drop)
 
 
-def history_rows(drive):
+def history_rows(drive, sizes=True):
+    """The kept full scans of ``drive`` (this volume only), newest first; ``sizes=False`` leaves out the folder sizes
+    (2.7.2: picking one scan read all 90 compressed size lists)."""
     App, cl = N['App'], N['cleaner']
     serial = cl.volume_serial(drive)
-    return [r for r in App.store.q('SELECT finished, serial, sizes FROM scan_history WHERE drive=? ORDER BY finished DESC', (drive,))
+    cols = 'finished, serial, sizes' if sizes else 'finished, serial'
+    return [r for r in App.store.q(f'SELECT {cols} FROM scan_history WHERE drive=? ORDER BY finished DESC', (drive,))
             if r['serial'] == serial]
 
 
 def space_at(drive, days):
     """S1.1: the folder sizes (50 MB or more) of the kept full scan nearest to ``days`` days ago, and how far back the
     kept scans reach. ``days`` 0 = the newest."""
-    rows = history_rows(drive)
+    rows = history_rows(drive, sizes=False)
     if not rows:
         return {'ok': True, 'ready': False, 'scans': 0}
     want = rows[0]['finished'] - days * DAY
@@ -55,7 +58,8 @@ def space_at(drive, days):
     oldest = rows[-1]['finished']
     exact = abs(pick['finished'] - want) <= 1.5 * DAY
     return {'ok': True, 'ready': True, 'exact': exact or days == 0, 'at': pick['finished'], 'oldest': oldest, 'scans': len(rows),
-            'days_back': round((rows[0]['finished'] - oldest) / DAY, 1), 'sizes': json.loads(zlib.decompress(pick['sizes']))}
+            'days_back': round((rows[0]['finished'] - oldest) / DAY, 1), 'sizes': json.loads(zlib.decompress(N['App'].store.q(
+                'SELECT sizes FROM scan_history WHERE drive=? AND finished=?', (drive, pick['finished']))[0]['sizes']))}
 
 
 # ---------------------------------------------------------------------------------------------- S1.3 forecast
@@ -205,11 +209,12 @@ def structured_summary(old, new, kind):
         head = re.compile(r'^(#{1,6})\s+(.+)')
         ha = [m.group(2).strip() for m in map(head.match, added) if m]
         hr = [m.group(2).strip() for m in map(head.match, removed) if m]
+        sa, sr = set(ha), set(hr)  # 2.7.2: looked up in a set, not a list (long documents)
         for x in ha:
-            if x not in hr:
+            if x not in sr:
                 out.append({'k': 'heading+', 'v': x})
         for x in hr:
-            if x not in ha:
+            if x not in sa:
                 out.append({'k': 'heading-', 'v': x})
     if kind == 'pptx':
         sl = re.compile(r'^\[Slide (\d+)\]\s*(.*)')
@@ -217,11 +222,12 @@ def structured_summary(old, new, kind):
         na, nr = sum(1 for x in a if sl.match(x)), sum(1 for x in b if sl.match(x))
         if nr != na:
             out.append({'k': 'slides', 'from': na, 'to': nr})
+        sta, str_ = set(ta), set(tr)
         for x in ta:
-            if x not in tr:
+            if x not in str_:
                 out.append({'k': 'slide+', 'v': x})
         for x in tr:
-            if x not in ta:
+            if x not in sta:
                 out.append({'k': 'slide-', 'v': x})
     if kind in ('docx', 'markdown', 'pptx'):
         rows = lambda ls: sum(1 for x in ls if x.startswith('| '))  # noqa: E731

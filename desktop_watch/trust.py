@@ -81,12 +81,12 @@ def retention_preview(days=7, limit=500):
     if not where:
         return {'ok': True, 'n': 0, 'items': [], 'bytes': 0, 'days': days, 'forever': True}
     rows = App.store.q(f'SELECT id, ts, kind, path, hash, prev_hash FROM events WHERE {where} ORDER BY ts', args)
-    ids = {r['id'] for r in rows}
     # a copy goes only if no change that stays (or a current file) still needs it
     keep = {c[2] for c in App.mon.confirmed.values() if c[2]}
-    for r in App.store.q('SELECT id, hash, prev_hash FROM events'):
-        if r['id'] not in ids:
-            keep |= {r['hash'], r['prev_hash']}
+    # asked of SQLite (2.7.2, Gemini's review): every change was read into Python to find the ones that stay
+    stays = f'id NOT IN (SELECT id FROM events WHERE {where})'
+    keep |= {r['h'] for r in App.store.q(f'SELECT hash h FROM events WHERE hash IS NOT NULL AND {stays}'
+                                         f' UNION SELECT prev_hash FROM events WHERE prev_hash IS NOT NULL AND {stays}', args + args)}
     freed = {}
     for r in rows:
         for h in (r['hash'], r['prev_hash']):
@@ -130,6 +130,7 @@ def folder_caps(store, blobs, keep):
                 continue
             try:
                 store.blob_path(h).unlink()
+                store.blob_gone(h)
             except OSError:
                 continue
             total -= sizes[h]
@@ -142,13 +143,32 @@ _overview = {'key': None, 'res': None}
 
 
 def overview():
-    """F2, cached until the watched files or their versions change, or a minute passes (2.7.1 G4: every open looked at
-    the disk once per watched file)."""
+    """F2, counted again when the watched files or their versions changed (at most every 5 s while they keep changing,
+    e.g. during first-time indexing) or after a minute (2.7.1 G4)."""
     App = N['App']
-    key = (App.mon.gen, int(time.time() // 60))
-    if _overview['key'] != key:
-        _overview.update(key=key, res={**_overview_now(), 'at': time.time()})
+    now, last = time.time(), _overview.get('at', 0)
+    if _overview['res'] is None or now - last >= 60 or (_overview['key'] != App.mon.gen and now - last >= 5):
+        gen = App.mon.gen
+        _overview.update(key=gen, at=now, res={**_overview_now(), 'at': now})
     return _overview['res']
+
+
+def protection_counter():
+    """The protection of many files at once (2.7.2): kept versions from one listing of the store instead of a look per
+    file, and a file's attributes asked only inside a cloud sync folder (a placeholder cannot be anywhere else)."""
+    kept = {h for h, _, _, _ in N['iter_blobs']()}
+    limit = settings()['snapshot_max_mb'] * 2 ** 20
+    clouds = tuple(os.path.normcase(r).rstrip('\\') + '\\' for r in N['cleaner'].cloud_roots())
+
+    def prot(p, size, h):
+        if size and size > limit:
+            return 'big'
+        if h and h in kept:
+            return 'kept'
+        if clouds and os.path.normcase(p).startswith(clouds) and N['cleaner'].online_only(p):
+            return 'cloud'
+        return 'text' if h else 'pending'
+    return prot
 
 
 def _overview_now():
@@ -157,8 +177,9 @@ def _overview_now():
     with App.mon.lock:
         items = list(App.mon.confirmed.items())
     by = {'kept': 0, 'big': 0, 'cloud': 0, 'text': 0, 'pending': 0}
+    prot = protection_counter()
     for p, c in items:
-        by[N['protection'](p, c[0], c[2])] += 1
+        by[prot(p, c[0], c[2])] += 1
     week = time.time() - 7 * DAY
     flags = {f: App.store.q(f"SELECT COUNT(*) n FROM events WHERE ts >= ? AND (',' || flags || ',') LIKE '%,{f},%'", (week,))[0]['n']
              for f in ('lowdisk', 'nosnap', 'cloud')}
@@ -178,7 +199,8 @@ def files_by_protection(kind, offset=0, limit=200):
     App = N['App']
     with App.mon.lock:
         items = [(p, c[0], c[1], c[2]) for p, c in App.mon.confirmed.items()]
-    hit = sorted((x for x in items if N['protection'](x[0], x[1], x[3]) == kind), key=lambda x: -x[2])
+    prot = protection_counter()
+    hit = sorted((x for x in items if prot(x[0], x[1], x[3]) == kind), key=lambda x: -x[2])
     counts = N['change_counts']()
     return {'files': [N['file_row'](p, s, m, h, counts.get(p, 0)) for p, s, m, h in hit[offset:offset + limit]], 'total': len(hit)}
 
@@ -305,8 +327,9 @@ def folder_slice(folder, since, until):
             net -= r['old_size'] or 0
         elif r['kind'] == 'modified':
             net += (r['size'] or 0) - (r['old_size'] or 0)
-        rel = os.path.relpath(r['path'], folder).split(os.sep)
-        key = os.path.join(folder, rel[0]) if len(rel) > 1 and not rel[0].startswith('..') else folder
+        # the rows were picked by the folder's prefix: a slice, not os.path.relpath (2.7.2)
+        rel = r['path'][len(lo):].split('\\') if r['path'].startswith(lo) else []
+        key = os.path.join(folder, rel[0]) if len(rel) > 1 else folder
         subs[key] = subs.get(key, 0) + 1
     return {'ok': True, 'folder': folder, 'since': since, 'until': until, 'total': len(rows), 'kinds': kinds, 'net': net,
             'subfolders': [{'path': k, 'name': os.path.basename(k) if k != folder else '.', 'n': v} for k, v in sorted(subs.items(), key=lambda x: -x[1])[:12]]}
@@ -460,12 +483,14 @@ def merge_backup(path):
     aside = N['DATA'] / f'watch before merge {time.strftime("%Y-%m-%d %H-%M-%S")}.db'
     target = sqlite3.connect(str(aside))
     with App.store.lock:
+        App.store.conn.commit()  # batched writes of other threads first: a backup of a connection inside a write transaction waits forever (2.7.2)
         App.store.conn.backup(target)
     target.close()
     st = App.store
     added = notes = copied = 0
     with st.lock:
         con = st.conn
+        con.commit()  # writes other threads batched (Store.batch) are committed first: ATTACH/BEGIN need no open transaction
         try:
             con.execute('ATTACH DATABASE ? AS bk', (f'file:{root / "watch.db"}?mode=ro',))
         except sqlite3.OperationalError:
@@ -473,7 +498,7 @@ def merge_backup(path):
         try:
             con.execute('BEGIN')
             rows = con.execute('SELECT b.* FROM bk.events b WHERE NOT EXISTS (SELECT 1 FROM main.events e WHERE e.ts = b.ts AND e.kind = b.kind'
-                               ' AND e.path = b.path AND COALESCE(e.hash, "") = COALESCE(b.hash, ""))').fetchall()
+                               " AND e.path = b.path AND COALESCE(e.hash, '') = COALESCE(b.hash, ''))").fetchall()
             cols = [c for c in rows[0].keys() if c != 'id'] if rows else []
             ids = {}
             for r in rows:

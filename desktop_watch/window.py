@@ -413,18 +413,30 @@ class AppWindow:
             u32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
         if msg.get('cmd') == 'beep':  # 2.7.0 M1-19: the Windows notification sound (follows the sound settings)
             u32.MessageBeep(0x40)
+        if 'zoom' in msg and self.controller:  # 2.7.0 M1-4: the view's own zoom (ICoreWebView2Controller::put_ZoomFactor)
+            try:
+                vcall(self.controller, 8, [ctypes.c_double], min(2.0, max(0.5, float(msg['zoom']))))
+            except (OSError, TypeError, ValueError) as e:
+                log(f'zoom: {e!r}')
         if 'topmost' in msg:  # 2.7.0 M1-2: on top of other windows, and a compact width
             u32.SetWindowPos(self.hwnd, PV(-1 if msg['topmost'] else -2), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
         if 'compact' in msg and bool(msg['compact']) != getattr(self, 'compact', None):
+            was = getattr(self, 'compact', None)
             self.compact = bool(msg['compact'])
             r = RECT()
             u32.GetWindowRect(self.hwnd, ctypes.byref(r))
             scale = (u32.GetDpiForWindow(self.hwnd) or 96) / 96
             if self.compact:
-                self.wide = r.right - r.left
+                if r.right - r.left > int(760 * scale):  # wider than compact: remember this width (if already narrow, keep the one remembered)
+                    self.wide = r.right - r.left
+                    try:  # remembered across restarts, so switching compact off later widens the window again
+                        self.state_file.write_text(json.dumps({**self.load_state(), 'wide': self.wide}), 'utf-8')
+                    except OSError:
+                        pass
                 u32.SetWindowPos(self.hwnd, None, 0, 0, int(740 * scale), r.bottom - r.top, 0x0002 | 0x0004 | 0x0010)
-            elif getattr(self, 'wide', None):
-                u32.SetWindowPos(self.hwnd, None, 0, 0, self.wide, r.bottom - r.top, 0x0002 | 0x0004 | 0x0010)
+            elif was or (was is None and r.right - r.left <= int(760 * scale) and self.load_state().get('wide')):  # it was compact
+                wide = getattr(self, 'wide', None) or self.load_state().get('wide') or int(1280 * scale)
+                u32.SetWindowPos(self.hwnd, None, 0, 0, wide, r.bottom - r.top, 0x0002 | 0x0004 | 0x0010)
         if msg.get('cmd') == 'external' and str(msg.get('url', '')).startswith(('http://', 'https://', 'mailto:')):
             os.startfile(msg['url'])
 

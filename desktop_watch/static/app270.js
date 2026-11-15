@@ -13,7 +13,9 @@ async function loadPrefs() {
 function setPref(k, v) { P[k] = v; applyPrefs(); return post('/api/settings', { [k]: v }); }
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches || P.animations === false;
 function applyPrefs() {
-  document.documentElement.style.zoom = (P.zoom || 100) / 100;   // M1-4
+  // M1-4: the app window zooms the whole view itself (like a browser's zoom), so pointer and element positions stay
+  // consistent for menus; CSS zoom misplaced them. Outside the app window the browser's own zoom is left alone.
+  if (window.chrome?.webview) hostMessage({ zoom: (P.zoom || 100) / 100 });
   document.documentElement.classList.toggle('no-motion', reduceMotion());  // M2-12
   document.documentElement.dataset.split = P.split || 'auto';   // M2-19
   hostMessage({ topmost: !!P.topmost, compact: !!P.compact });  // M1-2 (the app window does it)
@@ -457,7 +459,7 @@ renderCleanOverview = function () {
 /* S2.1: plain-language search in Changes -> filters shown as chips (each can be taken off); else as typed */
 const _rangeBounds = rangeBounds;
 rangeBounds = function () {
-  if (S.day && S.day.until) return [S.day.since, S.day.until];
+  if (S.day && (S.day.until || S.day.open)) return S.day.until ? [S.day.since, S.day.until] : [S.day.since];
   return _rangeBounds();
 };
 const _applyFilters = applyFilters;
@@ -475,7 +477,7 @@ applyFilters = async function () {
         else if (c.type === 'folder') S.folder = c.value;
         else if (c.type === 'time') {
           if (['today', 'yesterday'].includes(c.value)) { S.range = c.value; S.day = null; }
-          else S.day = { since: c.since, until: c.until || Date.now() / 1000 + 60, label: t('nl.' + c.value, { n: c.n }) };
+          else S.day = { since: c.since, until: c.until || null, open: !c.until, label: t('nl.' + c.value, { n: c.n }) };  // open-ended: new changes keep joining
         }
       }
       S.q = S.nlSeen = r.rest; $('#q').value = r.rest;
@@ -626,7 +628,7 @@ function viewMenuHTML() {
 
 /* M1-4: Ctrl + mouse wheel steps the text size 100 / 110 / 125 / 150 %, kept across restarts */
 window.addEventListener('wheel', ev => {
-  if (!ev.ctrlKey) return;
+  if (!ev.ctrlKey || !window.chrome?.webview) return;  // in a plain browser its own zoom applies
   ev.preventDefault();
   const steps = [100, 110, 125, 150], i = steps.indexOf(P.zoom || 100);
   const j = Math.max(0, Math.min(steps.length - 1, i + (ev.deltaY < 0 ? 1 : -1)));
@@ -666,9 +668,12 @@ document.addEventListener('mouseover', ev => {
     $('#hoverPeek')?.remove();
     const box = document.createElement('div'); box.id = 'hoverPeek'; box.className = 'hover-peek'; box.innerHTML = html;
     document.body.append(box);
-    const r = row.getBoundingClientRect();
-    box.style.left = Math.max(8, r.left - box.offsetWidth - 10) + 'px';
-    box.style.top = Math.min(innerHeight - box.offsetHeight - 8, Math.max(8, r.top)) + 'px';
+    const r = row.getBoundingClientRect(), w = box.offsetWidth, hgt = box.offsetHeight;
+    // 2.7.2: no room on the left (compact width) → to the right of the row, never on top of it (it flickered there)
+    let left = r.left - w - 10;
+    if (left < 8) left = r.right + 10 + w <= innerWidth - 8 ? r.right + 10 : Math.max(8, innerWidth - w - 8);
+    box.style.left = left + 'px';
+    box.style.top = Math.min(innerHeight - hgt - 8, Math.max(8, r.top)) + 'px';
   }, 450);
 }, { passive: true });
 document.addEventListener('scroll', () => $('#hoverPeek')?.remove(), { passive: true, capture: true });

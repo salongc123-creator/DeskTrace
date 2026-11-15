@@ -53,7 +53,7 @@ from extractors import EXTRACTABLE, VERSION as EXTRACT_VERSION, category_of, ext
 APP_DIR = Path(__file__).resolve().parent
 APP_ID = 'desktop-watch/1'   # internal id (kept from the old name: older copies answer to it)
 APP_NAME = 'DeskTrace'
-APP_VERSION = '2.7.1'      # the installer and update licenses take their version number from here
+APP_VERSION = '2.7.2'      # the installer and update licenses take their version number from here
 SCHEMA_VERSION = 2       # bump with a step in migrate() whenever stored data changes shape
 TOKEN = secrets.token_hex(16)
 
@@ -302,16 +302,47 @@ class Store:
     def blob_path(h):
         return BLOBS / h[:2] / h
 
-    def has_blob(self, h):
-        return bool(h) and self.blob_path(h).exists()
+    def has_blob(self, h, cached=False):
+        """A kept version is on disk. ``cached``: for display only (lists, previews) — a version seen or written
+        before counts without asking the disk again (2.7.2); restores and replaces always ask the disk."""
+        if not h:
+            return False
+        known = self.__dict__.setdefault('_known', set())
+        if cached and h in known:
+            return True
+        ok = self.blob_path(h).exists()
+        if ok:
+            known.add(h)
+        else:
+            known.discard(h)
+        return ok
+
+    def blob_gone(self, h):
+        self.__dict__.setdefault('_known', set()).discard(h)
 
     def put_blob(self, h, data):
         p = self.blob_path(h)
         if not p.exists():
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix('.tmp')
-            tmp.write_bytes(pack_snapshot(data))
-            os.replace(tmp, p)
+            dirs = self.__dict__.setdefault('_dirs', set())
+            if h[:2] not in dirs:  # the 256 version folders: created once, not looked for on every write (2.7.2)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                dirs.add(h[:2])
+            tmp = p.with_suffix(f'.{threading.get_ident()}.tmp')  # several threads may write versions at once (2.7.2)
+            try:
+                tmp.write_bytes(pack_snapshot(data))
+            except FileNotFoundError:  # the folder was removed meanwhile
+                p.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_bytes(pack_snapshot(data))
+            try:
+                os.replace(tmp, p)
+            except OSError:
+                if not p.exists():
+                    raise
+                try:
+                    tmp.unlink(missing_ok=True)  # the same content was just written by another thread
+                except OSError:
+                    pass  # a virus scanner still has the temporary file open: harmless, swept up later
+        self.__dict__.setdefault('_known', set()).add(h)
 
     def read_blob(self, h):
         """The content of a kept version, whether stored compressed (2.4.0) or as it was (older)."""
@@ -376,9 +407,9 @@ class Store:
         r = self.q('SELECT data FROM contents WHERE hash=?', (h,))
         if r:
             res = json.loads(zlib.decompress(r[0]['data']))
-            if res.get('v') == EXTRACT_VERSION or not self.has_blob(h):
+            if res.get('v') == EXTRACT_VERSION or not self.has_blob(h, cached=True):
                 return res
-        if self.has_blob(h):  # not extracted yet, or extracted by an older version
+        if self.has_blob(h, cached=True):  # not extracted yet, or extracted by an older version
             try:
                 res = extract(self.read_blob(h), ext)
             except (OSError, SnapshotError):
@@ -503,6 +534,9 @@ class Monitor:
         self.store, self.hub, self.settings = store, hub, settings
         self.rules = Rules(settings)
         self.lock = threading.RLock()
+        # held for a whole scan, copies included (2.7.2): settings, housekeeping and clearing the history wait for it,
+        # while the window's lists only need ``lock``, which a scan lets go while it copies files (unlocked())
+        self.scan_lock = threading.RLock()
         self.confirmed = {r['path']: [r['size'], r['mtime'], r['hash']]
                           for r in store.q('SELECT path, size, mtime, hash FROM files')}
         self.known_roots = set(store.meta('known_roots', []))
@@ -734,6 +768,32 @@ class Monitor:
         self.store.put_blob(h, data)
         return h, True
 
+    def capture_many(self, jobs):
+        """capture() for many files: side by side on 4 background-priority threads when there are 8 or more
+        (2.7.2: a folder of 2,000 changed files took 28 s one after another — reading, hashing, compressing and
+        writing the copies mostly waits for the disk and Windows' file scanning, which run in parallel).
+        ``jobs``: (path, size, force, prev) -> {path: (hash|None, ok)}."""
+        if len(jobs) < 8:
+            return {p: self.capture(p, size, force=force, prev=prev) for p, size, force, prev in jobs}
+        if getattr(self, '_pool', None) is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self._pool = ThreadPoolExecutor(4, thread_name_prefix='capture', initializer=background_thread)
+        res = self._pool.map(lambda j: self.capture(j[0], j[1], force=j[2], prev=j[3]), jobs)
+        return {j[0]: r for j, r in zip(jobs, res)}
+
+    def unlocked(self, fn, *a):
+        """Run ``fn`` with ``lock`` let go (2.7.2, Gemini's review): copying 2,000 changed files takes seconds, and
+        the Files list, Space, Duplicates and the status line waited for all of it. Only the scan's own thread calls
+        this; ``scan_lock`` stays held, so nothing that may remove tracked files or kept versions runs meanwhile."""
+        try:
+            state = self.lock._release_save()
+        except (AttributeError, RuntimeError):
+            return fn(*a)
+        try:
+            return fn(*a)
+        finally:
+            self.lock._acquire_restore(state)
+
     # -- change notifications --------------------------------------------------
     def sync_watchers(self):
         """One Windows change watcher per monitored folder (restarted if a folder comes back)."""
@@ -805,7 +865,7 @@ class Monitor:
                 if self.paused:
                     self.full_needed = True   # after a pause, look at everything once
                 else:
-                    with self.lock:           # settings changes wait for a whole scan to finish
+                    with self.scan_lock, self.lock:  # settings changes wait for a whole scan to finish
                         self.tick()
                 status = self.status()
                 sig = {k: v for k, v in status.items() if k not in ('last_scan', 'uptime', 'scan_ms', 'partial_ms', 'scans', 'scan_kind')}
@@ -913,7 +973,7 @@ class Monitor:
                     renames.append((p, pick, (c[0], c[1])))
 
             # Some tools give a moved file a new timestamp: pair what is left by identical content.
-            captured = {p: self.capture(p, st[0], force=p in force) for p, st in created}
+            captured = self.unlocked(self.capture_many, [(p, st[0], p in force, None) for p, st in created])
             by_hash = {}
             for p, st in created:
                 h, ok = captured[p]
@@ -934,6 +994,8 @@ class Monitor:
                     renames.append((p, new, nst))
 
             flags = 'offline' if offline else ''
+            captured.update(self.unlocked(self.capture_many, [(p, st[0], p in force, (self.confirmed.get(p) or (None, None, None))[2])
+                                                              for p, st in modified if p not in captured]))  # side by side (2.7.2)
             for old, new, nst in renames:
                 c = self.confirmed.pop(old)
                 self.confirmed[new] = [nst[0], nst[1], c[2]]
@@ -966,8 +1028,7 @@ class Monitor:
                         if disk_low():
                             f.append('lowdisk')
                         elif cleaner.online_only(p):
-                            f.append('cloud')  # online-only: recorded, not downloaded (2.3.0)
-                    if kind == 'modified' and h and prev and prev[2] == h:
+                            f.append('cloud')  # online-only: recorded, not downloaded (2.3.0)                    if kind == 'modified' and h and prev and prev[2] == h:
                         f.append('same')
                     self.emit(kind, p, size=st[0], old_size=prev[0] if prev else None, mtime=st[1], h=h,
                               prev=prev[2] if prev else None, flags=','.join(f))
@@ -1004,7 +1065,8 @@ class Monitor:
             'INSERT INTO events(ts,kind,path,old_path,ext,cat,size,old_size,mtime,hash,prev_hash,summary,flags)'
             ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (time.time(), kind, path, old_path, ext, category_of(ext), size, old_size, mtime, h, prev, summary, flags))
-        ev = self.event_dict(eid)
+        # every change comes from a scan that has just seen the file there (or gone): no second look at the disk (2.7.2)
+        ev = self.event_dict(eid, memo={('p', path): kind != 'deleted'})
         self.hub.publish({'type': 'event', 'event': ev})
         if self.on_event:
             self.on_event(ev)
@@ -1091,6 +1153,7 @@ class Monitor:
             self.store.many('UPDATE files SET hash=? WHERE path=?', pending)
 
     def _baseline_files(self, todo, pending, copy_max):
+        worked = time.monotonic()
         for i, (p, size, mtime) in enumerate(todo):
             self.stats['baseline_done'] = i
             wait_for_power(self.store)
@@ -1120,7 +1183,11 @@ class Monitor:
             if len(pending) >= 100:  # one database write per hundred files instead of one per file (2.1.0)
                 self.store.many('UPDATE files SET hash=? WHERE path=?', pending)
                 pending.clear()
-            time.sleep(0.002)
+            # a short rest after each 0.2 s of work, about 10 % (2.7.2: 2 ms after every file — 2.5 ms on Windows'
+            # clock — was most of the time 40,000 small files took; the thread runs at background priority anyway)
+            if time.monotonic() - worked >= 0.2:
+                time.sleep(0.02)
+                worked = time.monotonic()
 
     def index_backlog(self):
         """Put every current document version into the search index (e.g. text indexed before search existed)."""
@@ -1170,7 +1237,7 @@ class Monitor:
         # pinned files (2.6.0 #20) and noted versions are kept; per-folder limits (2.7.0 F10) — the same rule the preview (F3) uses
         removed = trust.expire_old(st)
         freed = 0
-        with self.lock:  # no new snapshots while deciding what is unused
+        with self.scan_lock, self.lock:  # no new snapshots while deciding what is unused (a scan copying files included)
             keep = {c[2] for c in self.confirmed.values() if c[2]}
             keep |= {r['h'] for r in st.q('SELECT hash h FROM events WHERE id IN (SELECT event_id FROM notes)'
                                           ' UNION SELECT prev_hash FROM events WHERE id IN (SELECT event_id FROM notes)'
@@ -1189,6 +1256,7 @@ class Monitor:
                     f.unlink()
                 except OSError:
                     return
+                st.blob_gone(h)
                 total, freed = total - size, freed + size
                 dropped.add(h)
 
@@ -1244,7 +1312,7 @@ class Monitor:
         if root not in self.settings['roots'] or self.root_available(root):
             return 0
         n = 0
-        with self.lock, self.store.batch():
+        with self.scan_lock, self.lock, self.store.batch():
             for p in [p for p in self.confirmed if under(p, root)]:
                 c = self.confirmed.pop(p)
                 self.store.x('DELETE FROM files WHERE path=?', (p,))
@@ -1276,7 +1344,7 @@ class Monitor:
         d['root_name'] = os.path.basename(root.rstrip(os.sep)) if root else ''
         for k, h in (('has_blob', d['hash']), ('has_prev_blob', d['prev_hash'])):
             if ('b', h) not in memo:
-                memo[('b', h)] = self.store.has_blob(h)
+                memo[('b', h)] = self.store.has_blob(h, cached=True)  # display only (2.7.2)
             d[k] = memo[('b', h)]
         if ('p', d['path']) not in memo:
             memo[('p', d['path'])] = os.path.exists(d['path'])
@@ -1631,7 +1699,8 @@ def find_cleanable(drive, refresh=True):
             _cleanable[drive] = {'state': 'done', 'items': items, 'at': time.time()}
             kept = App.store.meta('cleanable_last') or {}
             kept[drive] = {'at': time.time(), 'items': items}
-            App.store.set_meta('cleanable_last', {d: v for d, v in kept.items() if d in [x['drive'] for x in cleaner.drives()]})
+            present = {x['drive'] for x in cleaner.drives()}  # asked once, not once per remembered drive
+            App.store.set_meta('cleanable_last', {d: v for d, v in kept.items() if d in present})
         except Exception as e:
             _cleanable[drive] = {'state': 'failed', 'items': [], 'error': repr(e)}
     threading.Thread(target=work, daemon=True, name='cleanable').start()
@@ -1751,6 +1820,7 @@ def backup_history(dest, raw=False):
         import sqlite3 as sq
         target = sq.connect(str(root / 'watch.db'))
         with App.store.lock:
+            App.store.conn.commit()  # batched writes first: inside a write transaction the backup waits forever (2.7.2)
             App.store.conn.backup(target)
         target.close()
         shutil.copy2(SETTINGS_FILE, root / 'settings.json')
@@ -1817,6 +1887,7 @@ def export_history(dest):
         tmp = DATA / 'export-tmp.db'
         target = sqlite3.connect(str(tmp))
         with App.store.lock:
+            App.store.conn.commit()  # batched writes first: inside a write transaction the backup waits forever (2.7.2)
             App.store.conn.backup(target)
         target.close()
         blobs = list(iter_blobs())
@@ -1969,7 +2040,7 @@ def protection(p, size, h):
         return 'big'
     if h and App.store.has_blob(h):
         return 'kept'
-    if cleaner.online_only(p):
+    if cleaner.cloud_root_of(p) and cleaner.online_only(p):  # a placeholder exists only in a sync folder: no look elsewhere (2.7.2)
         return 'cloud'
     return 'text' if h else 'pending'
 
@@ -2804,7 +2875,8 @@ class Handler(BaseHTTPRequestHandler):
                 sc = _scans.get(cleaner.drive_of(path))
                 r = cleaner.delete_file(path, sc, recycle, permanent=bool(b.get('permanent')))
                 if r.get('ok'):
-                    find_cleanable(cleaner.drive_of(path), set())  # only the Recycle Bin grew (2.7.0 O1: all places were read again)
+                    # the Recycle Bin grew, and the places that held the file shrank: only those are read again (2.7.0 O1)
+                    find_cleanable(cleaner.drive_of(path), cleaner.places_holding(path))
                     if r.get('recycled'):
                         note_last_clean([path], r.get('size') or 0)
                 return self.send_json(r)
@@ -2945,17 +3017,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({'ok': ok, 'picked': p, 'update': App.updates.status(b.get('lang') or ui_lang()),
                                        'reason': App.updates.rejected.get(p)})
             if route == '/api/clear':
-                App.store.x('DELETE FROM events')
-                App.diff_cache.clear()
-                # keep snapshots still referenced as the current version of a tracked file
-                keep = {r['hash'] for r in App.store.q('SELECT hash FROM files WHERE hash IS NOT NULL')}
-                for sub in BLOBS.glob('*/*'):
-                    if sub.name not in keep:
-                        try:
-                            sub.unlink()
-                        except OSError:
-                            pass
-                App.store.x('DELETE FROM contents WHERE hash NOT IN (SELECT hash FROM files WHERE hash IS NOT NULL)')
+                with App.mon.scan_lock:  # not while a scan is copying versions it has not recorded yet (2.7.2)
+                    App.store.x('DELETE FROM events')
+                    App.diff_cache.clear()
+                    # keep snapshots still referenced as the current version of a tracked file
+                    keep = {r['hash'] for r in App.store.q('SELECT hash FROM files WHERE hash IS NOT NULL')}
+                    for sub in BLOBS.glob('*/*'):
+                        if sub.name not in keep:
+                            try:
+                                sub.unlink()
+                                App.store.blob_gone(sub.name)
+                            except OSError:
+                                pass
+                    App.store.x('DELETE FROM contents WHERE hash NOT IN (SELECT hash FROM files WHERE hash IS NOT NULL)')
                 App.storage['at'] = 0
                 App.hub.publish({'type': 'cleared'})
                 return self.send_json({'ok': True})
@@ -3559,8 +3633,9 @@ class Handler(BaseHTTPRequestHandler):
         if 'milestones' in b:
             new['milestones'] = bool(b['milestones'])  # 2.6.0 #50
         features.update_settings_extra(b, new)  # 2.7.0 preferences
+        retention_changed = retention_changed or new.get('folder_rules') != s.get('folder_rules')  # per-folder limits apply at once too
         scope_changed = any(new.get(k) != s.get(k) for k in ('roots', 'exclude_exts', 'exclude_names', 'exclude_dirs', 'exclude_paths'))
-        with App.mon.lock:
+        with App.mon.scan_lock, App.mon.lock:  # never in the middle of a scan (2.7.2: a scan lets ``lock`` go while copying)
             removed_roots = set(s['roots']) - set(new['roots'])
             App.mon.known_roots -= removed_roots
             App.store.set_meta('known_roots', sorted(App.mon.known_roots))
@@ -4210,11 +4285,18 @@ def user_busy_fullscreen():
 def wait_for_power(store=None):
     """Battery and presentation saver (2.1.0): heavy optional work (first-time indexing, comparing large
     files) waits while the PC runs on battery or a full-screen game, video or presentation is on.
-    Change detection itself goes on as normal."""
+    Change detection itself goes on as normal. The answer is remembered for 2 seconds (2.7.2: first-time indexing
+    asked Windows twice per file, 0.1 ms each — and the full-screen question goes to Explorer)."""
+    if time.monotonic() - _power['at'] < 2:
+        return
     while on_battery() or user_busy_fullscreen():
         if store:
             store.flush()  # nothing stays uncommitted while waiting
         time.sleep(60)
+    _power['at'] = time.monotonic()
+
+
+_power = {'at': -1e9}
 
 
 def trim_when_idle():

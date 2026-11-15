@@ -4,6 +4,27 @@ Every change has a level: **New** (new capability), **Major**, **Improved**, **P
 
 每项变化都有级别：新功能、重要改进、改进、打磨、修复。含“新功能”的版本第二位数字加一，否则第三位加一。
 
+## 2.7.2 — 2026-11-14
+
+- **Improved** · The window stays responsive while many changed files are being recorded: the file list and status no longer wait for the copies to be made  
+  改进 · 大量文件同时变化时窗口保持流畅：文件列表和状态不再等待版本复制完成
+- **Improved** · Recording a burst of changed files and the first look at a newly watched folder are about twice as fast  
+  改进 · 一次记录大量变化的文件，以及首次读取新监控的文件夹，速度约提高一倍
+- **Improved** · The protection overview opens at once also with tens of thousands of watched files  
+  改进 · 即使监控数万个文件，保护概览也能立即打开
+- **Improved** · Fixed: a history backup, export or merge could hang while many files were changing  
+  改进 · 修复：大量文件正在变化时，历史备份、导出或合并可能卡住
+- **Polish** · Fixed: moving a folder to another drive failed when its path contained & or ^  
+  打磨 · 修复：路径中含有 & 或 ^ 时，把文件夹移到其他磁盘会失败
+- **Polish** · "Still in the Recycle Bin" and "Only DeskTrace has it" are right also with more than 5,000 deleted files, and non-English names are matched correctly  
+  打磨 · “仍在回收站中”和“仅桌迹保存”在删除文件超过 5,000 个时也正确，非英文文件名也能正确匹配
+- **Polish** · Per-folder history limits take effect as soon as they are saved  
+  打磨 · 按文件夹设置的历史期限保存后立即生效
+- **Polish** · Text size uses the window's own zoom, so menus open in the right place; the compact width remembers the wide size across restarts  
+  打磨 · 文字大小改用窗口自身的缩放，菜单位置不再偏移；紧凑宽度在重启后仍记得原来的宽度
+- **Fix** · Lists such as "this week" keep adding new changes; the hover preview no longer covers the row at compact width  
+  修复 · “本周”等列表会持续加入新变化；紧凑宽度下悬停预览不再遮住该行
+
 ## 2.7.1 — 2026-11-12
 
 - **Improved** · Clean up opens at once on the sizes of its last look, also after a restart, and says when they are from while it reads them again  
